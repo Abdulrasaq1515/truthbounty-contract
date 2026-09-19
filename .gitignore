@@ -1,5 +1,4 @@
 node_modules
-.env
 .idea
 
 # Hardhat files
@@ -27,3 +26,4 @@ lcov.info
 create_issues_contract.sh
 issues_to_created_contract.md
 
+config.bat

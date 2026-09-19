@@ -47,7 +47,7 @@ describe("DisputeResolution", function () {
         const token = (await MockERC20Factory.deploy("Bounty", "BOUNTY")) as MockERC20;
         await token.waitForDeployment();
 
-        const StakeVaultFactory = await ethers.getContractFactory("StakeVault");
+        const StakeVaultFactory = await ethers.getContractFactory("contracts/StakeVault.sol:StakeVault");
         const vault = (await StakeVaultFactory.deploy(admin.address, await token.getAddress())) as StakeVault;
         await vault.waitForDeployment();
 
@@ -77,7 +77,7 @@ describe("DisputeResolution", function () {
     }
 
     async function createClaim(fx: Fixture, offset = 24n * 60n * 60n) {
-        const deadline = (await time.latest()) + offset;
+        const deadline = BigInt(await time.latest()) + offset;
         await fx.registry.connect(fx.claimCreator).createClaim(VALID_STATEMENT, VALID_CID, deadline);
         return deadline;
     }
@@ -92,7 +92,7 @@ describe("DisputeResolution", function () {
     }
 
     async function approveChallenge(fx: Fixture, who: SignerWithAddress, amount = BOND) {
-        await fx.token.connect(who).approve(await fx.dispute.getAddress(), amount);
+        await fx.token.connect(who).approve(await fx.vault.getAddress(), amount);
     }
 
     describe("openDispute - success", function () {
@@ -241,7 +241,8 @@ describe("DisputeResolution", function () {
             await dispute.connect(challenger).openDispute(claimId, OUTCOME_TRUE, RATIONALE);
 
             await expect(dispute.connect(challenger).openDispute(claimId, OUTCOME_TRUE, RATIONALE))
-                .to.be.revertedWithCustomError(dispute, "ClaimNotChallengeable");
+                .to.be.revertedWithCustomError(dispute, "DisputeAlreadyOpen")
+                .withArgs(claimId);
         });
     });
 
@@ -320,7 +321,7 @@ describe("DisputeResolution", function () {
             await vault.connect(admin).grantRole(OPERATOR_ROLE, await failingModule.getAddress());
 
             await failing.mint(challenger.address, ethers.parseEther("100000"));
-            await failing.connect(challenger).approve(await failingModule.getAddress(), BOND);
+            await failing.connect(challenger).approve(await vault.getAddress(), BOND);
 
             await createClaim(fx);
             const claimId = 1n;
@@ -330,11 +331,11 @@ describe("DisputeResolution", function () {
             await expect(failingModule.connect(challenger).openDispute(claimId, OUTCOME_TRUE, RATIONALE))
                 .to.be.revertedWithCustomError(failingModule, "CustodyTransitionFailed");
 
-            // Atomic: no dispute record, no claim transition, no vault lock, no residual allowance.
+            // Atomic: no dispute record, claim transition, or vault lock.
             expect(await failingModule.totalDisputes()).to.equal(0n);
             expect(await registry.getClaimStatus(claimId)).to.equal(VERIFIED_TRUE);
             expect(await vault.totalLocked()).to.equal(0n);
-            expect(await failing.allowance(await failingModule.getAddress(), await vault.getAddress())).to.equal(0n);
+            expect(await failing.allowance(challenger.address, await vault.getAddress())).to.equal(BOND);
         });
     });
 

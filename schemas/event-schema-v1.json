@@ -68,6 +68,7 @@
       "name": "Dispute Resolution",
       "description": "Reconstructs dispute challenges, escalation bonds, rulings, and resulting outcome overrides.",
       "eventNames": [
+        "DisputeOpenedV1",
         "DisputeRaisedV1",
         "DisputeResolvedV1"
       ]
@@ -514,6 +515,74 @@
       "stateReplayRole": "Reconstructs claims state transitions for indexer projection.",
       "financialImpact": false,
       "description": "Canonical V1 event for ClaimUpdatedV1."
+    },
+    {
+      "name": "DisputeOpenedV1",
+      "family": "disputes",
+      "signature": "event DisputeOpenedV1(uint256 indexed claimId, uint256 indexed disputeId, address indexed challenger, uint8 challengedOutcome, uint8 challengedStatus, address bondToken, uint256 bondAmount, uint64 appealDeadline, bytes32 appealRationaleHash, uint64 timestamp, uint16 version)",
+      "topic0": "0x2dc0b76268b3ea7f2776ca97823ec0e3f3850e8fd55d17a7edcef9142ba529c6",
+      "version": 1,
+      "indexedFieldsCount": 3,
+      "parameters": [
+        {
+          "name": "claimId",
+          "type": "uint256",
+          "indexed": true
+        },
+        {
+          "name": "disputeId",
+          "type": "uint256",
+          "indexed": true
+        },
+        {
+          "name": "challenger",
+          "type": "address",
+          "indexed": true
+        },
+        {
+          "name": "challengedOutcome",
+          "type": "uint8",
+          "indexed": false
+        },
+        {
+          "name": "challengedStatus",
+          "type": "uint8",
+          "indexed": false
+        },
+        {
+          "name": "bondToken",
+          "type": "address",
+          "indexed": false
+        },
+        {
+          "name": "bondAmount",
+          "type": "uint256",
+          "indexed": false
+        },
+        {
+          "name": "appealDeadline",
+          "type": "uint64",
+          "indexed": false
+        },
+        {
+          "name": "appealRationaleHash",
+          "type": "bytes32",
+          "indexed": false
+        },
+        {
+          "name": "timestamp",
+          "type": "uint64",
+          "indexed": false
+        },
+        {
+          "name": "version",
+          "type": "uint16",
+          "indexed": false
+        }
+      ],
+      "stateReplayRole": "Reconstructs disputes state transitions for indexer projection.",
+      "financialImpact": false,
+      "description": "Canonical V1 event for DisputeOpenedV1."
     },
     {
       "name": "DisputeRaisedV1",
@@ -2279,5 +2348,5 @@
       "description": "Canonical V1 event for WithdrawalQueuedV1."
     }
   ],
-  "checksum": "0x70c52259c0c7fe06527669b7af8469139295bf37ae39c494333ab8f16fbbae7d"
+  "checksum": "0x66ae40a63656615c2620ae328b971bcdaeb033eb02f6265d3b0f08627460cd3f"
 }

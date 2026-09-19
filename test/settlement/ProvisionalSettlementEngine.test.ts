@@ -11,6 +11,7 @@ import {
   GovernanceController,
 } from "../../typechain-types";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
+import { deployClaimRegistry } from "../helpers/deployClaimRegistry";
 
 describe("ProvisionalSettlementEngine (SC-015)", () => {
   let admin: SignerWithAddress;
@@ -60,9 +61,7 @@ describe("ProvisionalSettlementEngine (SC-015)", () => {
     await truthBounty.waitForDeployment();
 
     // 5. Deploy ClaimRegistry
-    const RegistryFactory = await ethers.getContractFactory("ClaimRegistry");
-    claimRegistry = await RegistryFactory.deploy(admin.address);
-    await claimRegistry.waitForDeployment();
+    claimRegistry = await deployClaimRegistry(admin.address);
 
     // 6. Deploy VerificationAggregator
     const AggFactory = await ethers.getContractFactory("VerificationAggregator");

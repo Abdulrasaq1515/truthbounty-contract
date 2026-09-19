@@ -541,7 +541,7 @@ describe("VerificationRoundManager", function () {
 
       await expect(
         vrm.connect(manager).openRound(CLAIM_ID_1, ROUND_TYPE_FIRST, deadline, MIN_STAKE, MAX_STAKE, WEIGHT_CAP, THRESHOLD, PARAM_VER)
-      ).to.be.revertedWith("Pausable: paused");
+      ).to.be.revertedWithCustomError(vrm, "EnforcedPause");
     });
 
     it("closeRound reverts when paused", async function () {
@@ -551,7 +551,7 @@ describe("VerificationRoundManager", function () {
       await time.increaseTo(deadline + 1);
       await vrm.connect(admin).pause();
 
-      await expect(vrm.closeRound(1n)).to.be.revertedWith("Pausable: paused");
+      await expect(vrm.closeRound(1n)).to.be.revertedWithCustomError(vrm, "EnforcedPause");
     });
 
     it("recordParticipant reverts when paused", async function () {
@@ -562,7 +562,7 @@ describe("VerificationRoundManager", function () {
 
       await expect(
         vrm.connect(manager).recordParticipant(1n, verifier1.address, MIN_STAKE)
-      ).to.be.revertedWith("Pausable: paused");
+      ).to.be.revertedWithCustomError(vrm, "EnforcedPause");
     });
   });
 

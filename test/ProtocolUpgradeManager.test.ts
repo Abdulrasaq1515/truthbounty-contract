@@ -91,9 +91,9 @@ describe("ProtocolUpgradeManager", function () {
       expect(await manager.hasRole(await manager.PAUSER_ROLE(), admin.address)).to.be.true;
     });
 
-    it("uses a 2 day default timelock", async function () {
+    it("uses a 7 day default timelock", async function () {
       const { manager } = await loadFixture(deployFixture);
-      expect(await manager.upgradeTimelock()).to.equal(2n * 24n * 60n * 60n);
+      expect(await manager.upgradeTimelock()).to.equal(7n * 24n * 60n * 60n);
     });
 
     it("starts with no registered modules or proposals", async function () {
@@ -306,7 +306,7 @@ describe("ProtocolUpgradeManager", function () {
 
     it("executes after the timelock and updates module state", async function () {
       const { manager, executor, implV1, implV2, proposalId } = await withApprovedUpgrade();
-      await time.increase(2 * 24 * 60 * 60 + 1);
+      await time.increase(7 * 24 * 60 * 60 + 1);
 
       const oldAddr = await implV1.getAddress();
       const newAddr = await implV2.getAddress();
@@ -341,7 +341,7 @@ describe("ProtocolUpgradeManager", function () {
 
     it("only EXECUTOR can execute", async function () {
       const { manager, user, proposalId } = await withApprovedUpgrade();
-      await time.increase(2 * 24 * 60 * 60 + 1);
+      await time.increase(7 * 24 * 60 * 60 + 1);
       await expect(manager.connect(user).executeUpgrade(proposalId)).to.be.revertedWithCustomError(
         manager,
         "AccessControlUnauthorizedAccount"
@@ -379,7 +379,7 @@ describe("ProtocolUpgradeManager", function () {
 
     it("cannot cancel an executed proposal", async function () {
       const { manager, executor, guardian, proposalId } = await withApprovedUpgrade();
-      await time.increase(2 * 24 * 60 * 60 + 1);
+      await time.increase(7 * 24 * 60 * 60 + 1);
       await manager.connect(executor).executeUpgrade(proposalId);
       await expect(manager.connect(guardian).cancelUpgrade(proposalId)).to.be.revertedWithCustomError(
         manager,
@@ -391,7 +391,7 @@ describe("ProtocolUpgradeManager", function () {
   describe("rollbackUpgrade", function () {
     it("restores the previous implementation and re-points authorization", async function () {
       const { manager, executor, guardian, implV1, implV2, proposalId } = await withApprovedUpgrade();
-      await time.increase(2 * 24 * 60 * 60 + 1);
+      await time.increase(7 * 24 * 60 * 60 + 1);
       await manager.connect(executor).executeUpgrade(proposalId);
 
       const oldAddr = await implV1.getAddress();
@@ -419,7 +419,7 @@ describe("ProtocolUpgradeManager", function () {
 
     it("blocks an unauthorized caller from rolling back", async function () {
       const { manager, user, executor, proposalId } = await withApprovedUpgrade();
-      await time.increase(2 * 24 * 60 * 60 + 1);
+      await time.increase(7 * 24 * 60 * 60 + 1);
       await manager.connect(executor).executeUpgrade(proposalId);
       await expect(manager.connect(user).rollbackUpgrade(MODULE_BOUNTY, "x")).to.be.revertedWithCustomError(
         manager,
@@ -431,7 +431,7 @@ describe("ProtocolUpgradeManager", function () {
   describe("Pausing", function () {
     it("blocks execution while paused but allows rollback", async function () {
       const { manager, admin, executor, guardian, proposalId } = await withApprovedUpgrade();
-      await time.increase(2 * 24 * 60 * 60 + 1);
+      await time.increase(7 * 24 * 60 * 60 + 1);
 
       await manager.connect(admin).pause();
       await expect(manager.connect(executor).executeUpgrade(proposalId)).to.be.revertedWithCustomError(
@@ -462,10 +462,10 @@ describe("ProtocolUpgradeManager", function () {
   describe("setUpgradeTimelock", function () {
     it("updates the timelock within bounds", async function () {
       const { manager, admin } = await loadFixture(deployFixture);
-      await expect(manager.connect(admin).setUpgradeTimelock(3 * 24 * 60 * 60))
+      await expect(manager.connect(admin).setUpgradeTimelock(8 * 24 * 60 * 60))
         .to.emit(manager, "UpgradeTimelockUpdated")
-        .withArgs(2n * 24n * 60n * 60n, 3n * 24n * 60n * 60n);
-      expect(await manager.upgradeTimelock()).to.equal(3n * 24n * 60n * 60n);
+        .withArgs(7n * 24n * 60n * 60n, 8n * 24n * 60n * 60n);
+      expect(await manager.upgradeTimelock()).to.equal(8n * 24n * 60n * 60n);
     });
 
     it("rejects out-of-bounds timelocks", async function () {
@@ -491,7 +491,7 @@ describe("ProtocolUpgradeManager", function () {
         .proposeUpgrade(MODULE_BOUNTY, await implV2.getAddress(), V1_0_1, STORAGE_HASH_V2, ZERO_HASH, "patch");
       await manager.connect(validator).attestStorageCompatibility(1, true);
       await manager.connect(upgrader).approveUpgrade(1);
-      await time.increase(2 * 24 * 60 * 60 + 1);
+      await time.increase(7 * 24 * 60 * 60 + 1);
       await manager.connect(executor).executeUpgrade(1);
       expect(await manager.versionString(MODULE_BOUNTY)).to.equal("1.0.1");
 

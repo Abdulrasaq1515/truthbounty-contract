@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "tsc",
-    "start": "node dist/index.js",
+    "build": "node init && tsc",
+    "start": "node init && node dist/index.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },

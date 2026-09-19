@@ -61,7 +61,7 @@ contract ParticipationConfidenceRulesTest is Test {
         assertEq(confidence, 6666);
     }
 
-    function test_ZeroParticipationReasonAndZeroConfidence() public pure {
+    function test_ZeroParticipationReasonAndZeroConfidence() public view {
         ParticipationThresholdTypes.ThresholdEvaluation memory result = ParticipationConfidenceRules.evaluate(
             _weights(0, 0, 0),
             baseConfig,
@@ -73,7 +73,7 @@ contract ParticipationConfidenceRulesTest is Test {
         assertEq(result.confidenceBps, 0);
     }
 
-    function test_InsufficientCountImmediatelyBelow() public pure {
+    function test_InsufficientCountImmediatelyBelow() public view {
         ParticipationThresholdTypes.ThresholdEvaluation memory below = ParticipationConfidenceRules.evaluate(
             _weights(100 ether, 0, 1),
             baseConfig,
@@ -89,7 +89,7 @@ contract ParticipationConfidenceRulesTest is Test {
         assertEq(uint256(at.reason), uint256(ParticipationThresholdTypes.InconclusiveReason.TIE));
     }
 
-    function test_InsufficientWeightImmediatelyBelow() public pure {
+    function test_InsufficientWeightImmediatelyBelow() public view {
         ParticipationThresholdTypes.ThresholdEvaluation memory below = ParticipationConfidenceRules.evaluate(
             _weights(50 ether, 50 ether, 3),
             baseConfig,
@@ -98,7 +98,7 @@ contract ParticipationConfidenceRulesTest is Test {
         assertEq(uint256(below.reason), uint256(ParticipationThresholdTypes.InconclusiveReason.INSUFFICIENT_TOTAL_WEIGHT));
     }
 
-    function test_InsufficientConfidenceImmediatelyBelow() public pure {
+    function test_InsufficientConfidenceImmediatelyBelow() public view {
         ParticipationThresholdTypes.ThresholdEvaluation memory below = ParticipationConfidenceRules.evaluate(
             _weights(550 ether, 450 ether, 3),
             baseConfig,
