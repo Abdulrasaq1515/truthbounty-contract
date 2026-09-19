@@ -13,7 +13,7 @@ describe("StakeVault (bond ledger)", function () {
         const token = (await MockERC20Factory.deploy("Bounty", "BOUNTY")) as MockERC20;
         await token.waitForDeployment();
 
-        const StakeVaultFactory = await ethers.getContractFactory("StakeVault");
+        const StakeVaultFactory = await ethers.getContractFactory("contracts/StakeVault.sol:StakeVault");
         const vault = (await StakeVaultFactory.deploy(admin.address, await token.getAddress())) as StakeVault;
         await vault.waitForDeployment();
 

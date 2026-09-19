@@ -11,6 +11,7 @@ import {
   MockReputationOracle,
   GovernanceController,
 } from "../../typechain-types";
+import { deployClaimRegistry } from "../helpers/deployClaimRegistry";
 
 export interface LifecycleAccounts {
   deployer: SignerWithAddress;
@@ -103,9 +104,7 @@ export async function deployLifecycleFixture(): Promise<LifecycleEnvironment> {
   await govController.waitForDeployment();
 
   // 4. Deploy ClaimRegistry
-  const RegistryFactory = await ethers.getContractFactory("ClaimRegistry", deployer);
-  const claimRegistry = await RegistryFactory.deploy(deployer.address);
-  await claimRegistry.waitForDeployment();
+  const claimRegistry = await deployClaimRegistry(deployer.address);
 
   // 5. Deploy TruthBountyWeighted (Verification source)
   const TBFactory = await ethers.getContractFactory("TruthBountyWeighted", deployer);

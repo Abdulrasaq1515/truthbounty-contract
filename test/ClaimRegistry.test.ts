@@ -187,7 +187,7 @@ describe("ClaimRegistry", function () {
 
             const deadline = await futureDeadline();
             await expect(registry.connect(user).createClaim(TYPICAL_STATEMENT, VALID_CID, deadline))
-                .to.emit(registry, "ClaimCreated")
+                .to.emit(registry, "ClaimCreated(uint256,address,string)")
                 .withArgs(1n, user.address, VALID_CID);
         });
 
@@ -200,7 +200,8 @@ describe("ClaimRegistry", function () {
             ).wait();
 
             const events = receipt!.logs.filter(
-                (l: { topics: readonly string[] }) => l.topics[0] === registry.interface.getEvent("ClaimCreated").topicHash,
+                (l: { topics: readonly string[] }) =>
+                    l.topics[0] === registry.interface.getEvent("ClaimCreated(uint256,address,string)").topicHash,
             );
             expect(events.length).to.equal(1);
         });
@@ -383,12 +384,12 @@ describe("ClaimRegistry", function () {
     describe("claimExists", function () {
         it("returns false for ID 0", async function () {
             const { registry } = await loadFixture(deployFixture);
-            expect(await registry.claimExists(0)).to.be.false;
+            expect(await registry["claimExists(uint256)"](0)).to.be.false;
         });
 
         it("returns false for an uncreated claim ID", async function () {
             const { registry } = await loadFixture(deployFixture);
-            expect(await registry.claimExists(999)).to.be.false;
+            expect(await registry["claimExists(uint256)"](999)).to.be.false;
         });
 
         it("returns true after a claim is created", async function () {
@@ -397,7 +398,7 @@ describe("ClaimRegistry", function () {
             const deadline = await futureDeadline();
             await registry.connect(user).createClaim(TYPICAL_STATEMENT, VALID_CID, deadline);
 
-            expect(await registry.claimExists(1)).to.be.true;
+            expect(await registry["claimExists(uint256)"](1)).to.be.true;
         });
 
         it("returns false for a future ID that has not yet been created", async function () {
@@ -406,7 +407,7 @@ describe("ClaimRegistry", function () {
             const deadline = await futureDeadline();
             await registry.connect(user).createClaim(TYPICAL_STATEMENT, VALID_CID, deadline);
 
-            expect(await registry.claimExists(2)).to.be.false;
+            expect(await registry["claimExists(uint256)"](2)).to.be.false;
         });
     });
 

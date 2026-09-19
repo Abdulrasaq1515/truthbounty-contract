@@ -124,6 +124,7 @@ const EVENT_FAMILY_MAP: Record<string, string> = {
   RoundStartedV1: "rounds",
   RoundEndedV1: "rounds",
   OutcomeAggregatedV1: "outcomes",
+  DisputeOpenedV1: "disputes",
   DisputeRaisedV1: "disputes",
   DisputeResolvedV1: "disputes",
   RewardCalculatedV1: "rewards",

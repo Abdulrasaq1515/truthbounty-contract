@@ -10,6 +10,7 @@ import {
   GovernanceController,
 } from "../../typechain-types";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
+import { deployClaimRegistry } from "../helpers/deployClaimRegistry";
 
 describe("AppealVerificationRound (SC-017)", () => {
   let admin: SignerWithAddress;
@@ -49,9 +50,7 @@ describe("AppealVerificationRound (SC-017)", () => {
     await govController.waitForDeployment();
 
     // 4. Deploy ClaimRegistry
-    const RegistryFactory = await ethers.getContractFactory("ClaimRegistry");
-    claimRegistry = await RegistryFactory.deploy(admin.address);
-    await claimRegistry.waitForDeployment();
+    claimRegistry = await deployClaimRegistry(admin.address);
 
     // 5. Deploy AppealVerificationRound
     const AppealFactory = await ethers.getContractFactory("AppealVerificationRound");

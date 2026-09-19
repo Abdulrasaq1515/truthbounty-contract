@@ -163,9 +163,8 @@ contract DisputeResolution is IDisputeResolution, ReentrancyGuard, Pausable, Acc
     /**
      * @inheritdoc IDisputeResolution
      *
-     * @dev The caller must have approved this module (not the vault) for at least
-     *      `bondAmount`; this module approves the vault inline after validating
-     *      the allowance, so a single approval is required end to end.
+     * @dev The caller must approve the configured vault for at least
+     *      `bondAmount`; the vault is the ERC-20 spender and bond custodian.
      */
     function openDispute(
         uint256 claimId,
@@ -175,6 +174,10 @@ contract DisputeResolution is IDisputeResolution, ReentrancyGuard, Pausable, Acc
         // -- 1. Timing & state validation --------------------------------
         IClaimRegistry.Claim memory claim = claimRegistry.getClaim(claimId);
         if (claim.createdAt == 0) revert ClaimNotFound(claimId);
+
+        // Exactly one appeal path per claim. Check this before status because a
+        // successful first dispute transitions the claim to UnderDispute.
+        if (_disputesByClaim[claimId] != 0) revert DisputeAlreadyOpen(claimId);
 
         IClaimRegistry.ClaimStatus status = claim.status;
         if (status != IClaimRegistry.ClaimStatus.VerifiedTrue &&
@@ -188,13 +191,10 @@ contract DisputeResolution is IDisputeResolution, ReentrancyGuard, Pausable, Acc
         if (block.timestamp <= verificationDeadline) revert ChallengeWindowNotOpen();
         if (block.timestamp > frozenDeadline) revert FrozenDeadlinePassed();
 
-        // Exactly one appeal path per claim.
-        if (_disputesByClaim[claimId] != 0) revert DisputeAlreadyOpen(claimId);
-
         // -- 2. Bond config ----------------------------------------------
         if (bondAmount == 0 || bondToken == address(0)) revert BondNotConfigured();
 
-        if (IERC20(bondToken).allowance(msg.sender, address(this)) < bondAmount) {
+        if (IERC20(bondToken).allowance(msg.sender, address(vault)) < bondAmount) {
             revert InsufficientBondAllowance();
         }
 
@@ -204,13 +204,11 @@ contract DisputeResolution is IDisputeResolution, ReentrancyGuard, Pausable, Acc
             _nextDisputeId = disputeId + 1;
         }
 
-        // Authorize the vault to pull the bond on behalf of the challenger.
-        IERC20(bondToken).safeIncreaseAllowance(address(vault), bondAmount);
+        // The challenger authorizes the vault directly; the vault is the ERC-20
+        // spender and records the challenger as the bond depositor.
         try vault.lockBond(disputeId, bondToken, msg.sender, bondAmount) {
             // success — proceed
         } catch {
-            // Ensure no residual allowance or state persists on failure.
-            IERC20(bondToken).safeDecreaseAllowance(address(vault), bondAmount);
             revert CustodyTransitionFailed();
         }
 
