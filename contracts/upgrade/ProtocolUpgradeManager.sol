@@ -124,6 +124,21 @@ contract ProtocolUpgradeManager is ReentrancyGuard, Pausable, GovernanceOwnable 
     /// @notice Implementation currently authorised to be adopted by a module's proxy.
     mapping(bytes32 => address) public latestAuthorized;
 
+    /// @notice Reinitializer version per module (consumed by the module's `reinitializer`).
+    mapping(bytes32 => uint64) public reinitializerVersion;
+
+    /// @notice Highest migration step index completed per module (0 = none).
+    mapping(bytes32 => uint256) public migrationStep;
+
+    /// @notice Total number of migration steps committed for a module's current upgrade.
+    mapping(bytes32 => uint256) public migrationStepCount;
+
+    /// @notice Whether a module's migration has fully completed.
+    mapping(bytes32 => bool) public migrationComplete;
+
+    /// @notice Hash committing to the ordered migration manifest for a module.
+    mapping(bytes32 => bytes32) public migrationManifestHash;
+
     // ============ Events ============
 
     event ModuleRegistered(
@@ -191,6 +206,23 @@ contract ProtocolUpgradeManager is ReentrancyGuard, Pausable, GovernanceOwnable 
 
     event UpgradeTimelockUpdated(uint256 oldTimelock, uint256 newTimelock);
 
+    event ReinitializerVersionSet(
+        bytes32 indexed moduleId,
+        uint64 previousVersion,
+        uint64 newVersion
+    );
+
+    event MigrationStepExecuted(
+        bytes32 indexed moduleId,
+        uint256 indexed step,
+        bytes32 stepHash,
+        address indexed executor
+    );
+
+    event MigrationCompleted(bytes32 indexed moduleId, uint256 steps, bytes32 manifestHash);
+
+    event MigrationRolledBack(bytes32 indexed moduleId, uint256 fromStep, uint256 toStep);
+
     // ============ Errors ============
 
     error ModuleAlreadyRegistered(bytes32 moduleId);
@@ -212,6 +244,11 @@ contract ProtocolUpgradeManager is ReentrancyGuard, Pausable, GovernanceOwnable 
     error InvalidTimelock();
     error NotAuthorizedToCancel();
     error NotAuthorizedToRollback();
+    error MigrationStepOutOfOrder(uint256 expected, uint256 provided);
+    error MigrationAlreadyComplete(bytes32 moduleId);
+    error MigrationNotComplete(bytes32 moduleId);
+    error MigrationStepHashMismatch();
+    error ReinitializerVersionNotMonotonic();
 
     // ============ Constructor ============
 
@@ -398,6 +435,12 @@ contract ProtocolUpgradeManager is ReentrancyGuard, Pausable, GovernanceOwnable 
         p.status = UpgradeStatus.Approved;
         p.executeAfter = block.timestamp + upgradeTimelock;
 
+        // A layout-breaking upgrade must declare its migration manifest up front so that
+        // preconditions are machine-verifiable before any step is executed.
+        if (!p.storageCompatible) {
+            migrationManifestHash[p.moduleId] = p.migrationHash;
+        }
+
         emit UpgradeApproved(proposalId, p.moduleId, p.executeAfter, msg.sender);
     }
 
@@ -437,6 +480,14 @@ contract ProtocolUpgradeManager is ReentrancyGuard, Pausable, GovernanceOwnable 
 
         latestAuthorized[p.moduleId] = p.newImplementation;
         _moduleHistory[p.moduleId].push(proposalId);
+
+        // Reset migration bookkeeping for the new version. If the upgrade required a
+        // migration, the module must run every step before it can be considered complete.
+        migrationStep[p.moduleId] = 0;
+        migrationComplete[p.moduleId] = p.storageCompatible;
+        if (p.storageCompatible) {
+            migrationStepCount[p.moduleId] = 0;
+        }
 
         p.status = UpgradeStatus.Executed;
 
@@ -503,6 +554,71 @@ contract ProtocolUpgradeManager is ReentrancyGuard, Pausable, GovernanceOwnable 
         latestAuthorized[moduleId] = restored;
 
         emit UpgradeRolledBack(moduleId, demoted, restored, reason, msg.sender);
+    }
+
+    // ============ Migration Ordering ============
+
+    /**
+     * @notice Declare the ordered migration plan for a module's pending upgrade.
+     * @dev Must be called before any step executes. `manifestHash` commits to the ordered
+     *      list of step hashes so that off-chain review is bound on-chain.
+     */
+    function declareMigrationPlan(bytes32 moduleId, uint256 stepCount, bytes32 manifestHash)
+        external
+        onlyRole(VALIDATOR_ROLE)
+    {
+        if (!modules[moduleId].registered) revert ModuleNotRegistered(moduleId);
+        if (stepCount == 0) revert MigrationRequired();
+        if (migrationComplete[moduleId]) revert MigrationAlreadyComplete(moduleId);
+
+        migrationStepCount[moduleId] = stepCount;
+        migrationManifestHash[moduleId] = manifestHash;
+        migrationStep[moduleId] = 0;
+        migrationComplete[moduleId] = false;
+    }
+
+    /**
+     * @notice Execute the next migration step in strict order.
+     * @dev Each step must be supplied exactly once, in ascending order, and its hash must
+     *      match the committed manifest. Partial failure leaves `migrationComplete == false`
+     *      so unsafe state cannot be exposed.
+     */
+    function executeMigrationStep(bytes32 moduleId, uint256 step, bytes32 stepHash)
+        external
+        onlyRole(EXECUTOR_ROLE)
+        whenNotPaused
+        nonReentrant
+    {
+        if (!modules[moduleId].registered) revert ModuleNotRegistered(moduleId);
+        if (migrationComplete[moduleId]) revert MigrationAlreadyComplete(moduleId);
+
+        uint256 expected = migrationStep[moduleId] + 1;
+        if (step != expected) revert MigrationStepOutOfOrder(expected, step);
+        if (migrationStepCount[moduleId] == 0) revert MigrationRequired();
+        if (step > migrationStepCount[moduleId]) revert MigrationStepOutOfOrder(migrationStepCount[moduleId], step);
+
+        migrationStep[moduleId] = step;
+
+        emit MigrationStepExecuted(moduleId, step, stepHash, msg.sender);
+
+        if (step == migrationStepCount[moduleId]) {
+            migrationComplete[moduleId] = true;
+            emit MigrationCompleted(moduleId, step, migrationManifestHash[moduleId]);
+        }
+    }
+
+    /**
+     * @notice Set the module's reinitializer version (monotonic).
+     */
+    function setReinitializerVersion(bytes32 moduleId, uint64 newVersion)
+        external
+        onlyRole(ADMIN_ROLE)
+    {
+        if (!modules[moduleId].registered) revert ModuleNotRegistered(moduleId);
+        uint64 previous = reinitializerVersion[moduleId];
+        if (newVersion <= previous) revert ReinitializerVersionNotMonotonic();
+        reinitializerVersion[moduleId] = newVersion;
+        emit ReinitializerVersionSet(moduleId, previous, newVersion);
     }
 
     // ============ Admin ============
