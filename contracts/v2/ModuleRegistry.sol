@@ -22,6 +22,11 @@ import {V2SafeCast} from "./libraries/V2SafeCast.sol";
 contract ModuleRegistry is ERC165, AccessControl, IModuleRegistry {
     using ERC165Checker for address;
 
+    /// @notice Maximum number of module records retained by this registry.
+    uint256 public constant MAX_REGISTERED_MODULES = 256;
+    /// @notice Maximum items accepted by registration, activation, and dependency batches.
+    uint256 public constant MAX_REGISTRY_BATCH_SIZE = 32;
+
     bytes32 public constant DEPLOYMENT_ROLE = keccak256("DEPLOYMENT_ROLE");
     bytes32 public constant GOVERNANCE_ROLE = keccak256("GOVERNANCE_ROLE");
     bytes32 public constant GUARDIAN_ROLE = keccak256("GUARDIAN_ROLE");
@@ -71,6 +76,9 @@ contract ModuleRegistry is ERC165, AccessControl, IModuleRegistry {
         if (_modules[registration.moduleId].status != ModuleStatus.NONE) {
             revert V2Errors.DuplicateModule(registration.moduleId);
         }
+        if (_moduleIds.length >= MAX_REGISTERED_MODULES) {
+            revert V2Errors.RegisteredModuleLimitExceeded(_moduleIds.length + 1, MAX_REGISTERED_MODULES);
+        }
         bytes32 versionId = _validateRegistration(registration, bytes32(0));
         ModuleInfo storage info = _modules[registration.moduleId];
         info.versionId = versionId;
@@ -101,6 +109,13 @@ contract ModuleRegistry is ERC165, AccessControl, IModuleRegistry {
         returns (bytes32[] memory)
     {
         _rejectGuardian();
+        uint256 batchLength = registrations.length;
+        if (batchLength > MAX_REGISTRY_BATCH_SIZE) {
+            revert V2Errors.RegistryBatchTooLarge(batchLength, MAX_REGISTRY_BATCH_SIZE);
+        }
+        if (batchLength > MAX_REGISTERED_MODULES - _moduleIds.length) {
+            revert V2Errors.RegisteredModuleLimitExceeded(_moduleIds.length + batchLength, MAX_REGISTERED_MODULES);
+        }
         bytes32[] memory versionIds = new bytes32[](registrations.length);
         for (uint256 i = 0; i < registrations.length; ++i) {
             versionIds[i] = registerModule(registrations[i]);
@@ -117,6 +132,9 @@ contract ModuleRegistry is ERC165, AccessControl, IModuleRegistry {
 
     function activateModules(bytes32[] calldata moduleIds) external override onlyRole(DEPLOYMENT_ROLE) {
         _rejectGuardian();
+        if (moduleIds.length > MAX_REGISTRY_BATCH_SIZE) {
+            revert V2Errors.RegistryBatchTooLarge(moduleIds.length, MAX_REGISTRY_BATCH_SIZE);
+        }
         bytes32[] memory batch = new bytes32[](moduleIds.length);
         for (uint256 i = 0; i < moduleIds.length; ++i) {
             _assertActivationEligible(moduleIds[i]);
@@ -318,6 +336,9 @@ contract ModuleRegistry is ERC165, AccessControl, IModuleRegistry {
         override
         returns (Dependency[] memory dependencies)
     {
+        if (moduleIds.length > MAX_REGISTRY_BATCH_SIZE) {
+            revert V2Errors.RegistryBatchTooLarge(moduleIds.length, MAX_REGISTRY_BATCH_SIZE);
+        }
         Dependency[11] memory edges = ModuleRegistryLib.canonicalDependencies();
         uint256 count;
         for (uint256 i = 0; i < edges.length; ++i) {

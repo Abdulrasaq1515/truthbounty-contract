@@ -46,11 +46,18 @@ library V2Errors {
 
     /// @notice Creator holds too many non-terminal claims (V2-SC-105).
     error TooManyOpenClaims(address account, uint256 count, uint256 limit);
+    /// @notice Claim metadata exceeded its published calldata budget.
+    error ClaimMetadataTooLarge(uint256 provided, uint256 maximum);
 
 
     /// @notice Attempted action by an unregistered or unauthorized module.
     /// @param caller Address that failed the module authorization check.
     error UnauthorizedModule(address caller);
+
+    /// @notice A module registry batch exceeded its published item limit.
+    error RegistryBatchTooLarge(uint256 provided, uint256 maximum);
+    /// @notice Registering modules would exceed the bounded module catalog.
+    error RegisteredModuleLimitExceeded(uint256 provided, uint256 maximum);
 
     /// @notice Zero admin address supplied at construction.
     error ZeroAdmin();

@@ -136,6 +136,21 @@ contract ModuleRegistryTest is Test {
         assertEq(uint256(registry.moduleStatus(evidence)), uint256(IModuleRegistry.ModuleStatus.REGISTERED));
     }
 
+    function test_registerModules_rejectsBatchAbovePublishedLimit() public {
+        IModuleRegistry.ModuleRegistration[] memory regs = new IModuleRegistry.ModuleRegistration[](
+            registry.MAX_REGISTRY_BATCH_SIZE() + 1
+        );
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                V2Errors.RegistryBatchTooLarge.selector,
+                regs.length,
+                registry.MAX_REGISTRY_BATCH_SIZE()
+            )
+        );
+        registry.registerModules(regs);
+    }
+
     function test_registerModules_atomicBatch_revertsEverything() public {
         bytes32 claims = ModuleRegistryLib.MODULE_CLAIMS;
         MockV2Module a = _fresh(claims, 2, 0);
