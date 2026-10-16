@@ -96,6 +96,13 @@ jobs:
         run: |
           node scripts/check-release-reproducibility.mjs
           node --test test/scripts/check-release-reproducibility.test.mjs
+      # PREWAVE-SC-062: per-contract and proxy deployment size budgets — oversized
+      # contracts must not be broadcast.  Growth is attributed per contract in the
+      # release report written to deployments/releases/deployment-size-report.json.
+      - name: Deployment size budget gate (PREWAVE-SC-062)
+        run: |
+          node scripts/check-deployment-sizes.mjs
+          node --test test/scripts/check-deployment-sizes.test.mjs
       - name: Run Foundry tests (forge test)
         run: forge test --no-match-path "test/{invariant,fuzz}/**"
       - name: Run Hardhat tests
