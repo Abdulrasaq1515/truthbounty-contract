@@ -40,7 +40,10 @@
     "test:canonical-abi": "node --test test/scripts/canonical-abi-gates.test.mjs",
     "check:reproducibility": "node scripts/check-release-reproducibility.mjs",
     "test:reproducibility": "node --test test/scripts/check-release-reproducibility.test.mjs",
-    "lint": "npm run check:boundaries && npm run test:boundaries && npm run check:canonical-abi && npm run test:canonical-abi && npm run test:reproducibility",
+    "check:deployment-sizes": "node scripts/check-deployment-sizes.mjs",
+    "check:deployment-sizes:baseline": "node scripts/check-deployment-sizes.mjs --write-baseline",
+    "test:deployment-sizes": "node --test test/scripts/check-deployment-sizes.test.mjs",
+    "lint": "npm run check:boundaries && npm run test:boundaries && npm run check:canonical-abi && npm run test:canonical-abi && npm run test:reproducibility && npm run test:deployment-sizes",
     "sbom:release": "ts-node scripts/generateContractReleaseSbom.ts",
     "test:sbom": "hardhat test test/ContractReleaseSbom.test.ts"
   },
