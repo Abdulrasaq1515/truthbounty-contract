@@ -11,11 +11,19 @@ import {RoundFinalization} from "./RoundFinalization.sol";
  * @title ParticipationThresholdEngine
  * @notice V2-SC-014 engine applying frozen round thresholds to aggregated weights.
  *
- * @dev Extended by PREWAVE-SC-046 (#722) to expose finalizeRound() -- the
- *      authoritative on-chain path that binds finality to block.timestamp
- *      rather than a caller-supplied boolean. finalize() in RoundFinalization
- *      is a pure helper for off-chain preview; this function is the canonical
- *      machine-readable consumer handoff required by #722.
+ * @dev Extended by PREWAVE-SC-046 (#722):
+ *
+ *      FINALITY BINDING
+ *      finalizeRound() reads challengeDeadline from FrozenRoundConfigStore --
+ *      it is never accepted from the caller. The EVALUATOR_ROLE cannot shorten
+ *      or replace it. Passing a deadline of 0 is the legacy path where no
+ *      deadline was set; finalization is permitted immediately in that case only.
+ *
+ *      AGGREGATION BINDING
+ *      finalizeRound() requires evaluateRound() to have been called first
+ *      (_evaluated[id] must be true). It reads the stored ThresholdEvaluation
+ *      and does not accept fresh WeightTotals -- the same round cannot be
+ *      evaluated with one result and finalized with another.
  */
 contract ParticipationThresholdEngine is AccessControl {
     bytes32 public constant EVALUATOR_ROLE = keccak256("EVALUATOR_ROLE");
@@ -25,7 +33,6 @@ contract ParticipationThresholdEngine is AccessControl {
     mapping(bytes32 => ParticipationThresholdTypes.ThresholdEvaluation) private _evaluations;
     mapping(bytes32 => bool) private _evaluated;
 
-    // PREWAVE-SC-046: store finalization records keyed by roundId
     mapping(bytes32 => RoundFinalization.FinalizationRecord) private _finalizations;
     mapping(bytes32 => bool) private _finalized;
 
@@ -42,18 +49,23 @@ contract ParticipationThresholdEngine is AccessControl {
         uint256 confidenceBps
     );
 
-    /// @notice Canonical machine-readable event required by PREWAVE-SC-046.
-    /// @dev Settlement and reward modules must consume this event as the
-    ///      authoritative finalization signal. isProvisional is always false
-    ///      here because finalizeRound() enforces the challenge window.
+    /**
+     * @notice Canonical machine-readable finalization event (PREWAVE-SC-046).
+     * @dev Settlement and reward modules MUST consume this event as the
+     *      authoritative signal. isProvisional is always false because
+     *      finalizeRound() enforces the stored challenge deadline.
+     *      trueWeight/falseWeight come from the stored ThresholdEvaluation,
+     *      not from a caller-supplied argument.
+     */
     event RoundFinalized(
         bytes32 indexed roundId,
         uint256 indexed claimId,
         ParticipationThresholdTypes.RoundKind roundKind,
         RoundFinalization.TerminalState terminalState,
         RoundFinalization.EconomicOutcome economicOutcome,
-        uint256 confidenceBps,
-        bool isProvisional
+        uint256 trueWeight,
+        uint256 falseWeight,
+        uint256 confidenceBps
     );
 
     // -------------------------------------------------------------------------
@@ -63,10 +75,9 @@ contract ParticipationThresholdEngine is AccessControl {
     error AlreadyEvaluated(bytes32 roundId);
     error RoundNotFrozen(bytes32 roundId);
     error AlreadyFinalized(bytes32 roundId);
-
-    /// @notice Reverts when block.timestamp < challengeDeadline on the
-    ///         authoritative finalizeRound() path. Premature finalization
-    ///         is impossible -- not merely caller-disciplined.
+    /// @notice finalizeRound() called before evaluateRound().
+    error NotEvaluated(bytes32 roundId);
+    /// @notice block.timestamp is before the frozen challenge deadline.
     error ChallengeWindowStillOpen(bytes32 roundId, uint64 challengeDeadline);
 
     // -------------------------------------------------------------------------
@@ -80,9 +91,13 @@ contract ParticipationThresholdEngine is AccessControl {
     }
 
     // -------------------------------------------------------------------------
-    // Existing evaluation path (unchanged -- preserves SC-014 consumers)
+    // Evaluation path (SC-014, unchanged)
     // -------------------------------------------------------------------------
 
+    /**
+     * @notice Evaluate aggregated weights against frozen thresholds and store result.
+     * @dev Must be called before finalizeRound(). Idempotent -- reverts on second call.
+     */
     function evaluateRound(
         uint256 claimId,
         ParticipationThresholdTypes.RoundKind roundKind,
@@ -98,7 +113,12 @@ contract ParticipationThresholdEngine is AccessControl {
         _evaluations[id] = evaluation;
         _evaluated[id] = true;
 
-        emit ThresholdEvaluated(id, claimId, roundKind, evaluation.outcome, evaluation.reason, evaluation.confidenceBps);
+        emit ThresholdEvaluated(
+            id, claimId, roundKind,
+            evaluation.outcome,
+            evaluation.reason,
+            evaluation.confidenceBps
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -106,43 +126,53 @@ contract ParticipationThresholdEngine is AccessControl {
     // -------------------------------------------------------------------------
 
     /**
-     * @notice Produce and store the canonical FinalizationRecord for a round.
+     * @notice Finalize a round using its stored ThresholdEvaluation.
      *
-     * @dev This is the authoritative on-chain path required by PREWAVE-SC-046.
-     *      Finality is bound to block.timestamp >= challengeDeadline. The
-     *      caller supplies challengeDeadline (frozen at round open); this
-     *      contract verifies it against block.timestamp and reverts with
-     *      ChallengeWindowStillOpen if the window has not elapsed.
-     *      Premature finalization is impossible, not merely discouraged.
+     * @dev Requirements (all enforced on-chain, not caller-disciplined):
+     *      1. The round config must be frozen in configStore.
+     *      2. evaluateRound() must have been called (_evaluated[id] == true).
+     *      3. The frozen challenge deadline (from configStore) must have elapsed.
+     *         The caller does NOT supply the deadline.
+     *      4. Can only be called once per round (idempotent).
      *
-     *      The resulting RoundFinalized event is the canonical machine-readable
-     *      consumer handoff for settlement and reward modules.
+     *      Outcome comes from _evaluations[id] -- the same stored record that
+     *      evaluateRound() wrote. Fresh WeightTotals are not accepted.
      *
-     * @param claimId           The claim being finalized.
-     * @param roundKind         FIRST or APPEAL.
-     * @param weights           Aggregated weight totals from the aggregator.
-     * @param challengeDeadline Unix timestamp after which the challenge window
-     *                          is elapsed. Frozen at round open.
+     * @param claimId   The claim being finalized.
+     * @param roundKind FIRST or APPEAL.
      */
     function finalizeRound(
         uint256 claimId,
-        ParticipationThresholdTypes.RoundKind roundKind,
-        ParticipationThresholdTypes.WeightTotals calldata weights,
-        uint64 challengeDeadline
+        ParticipationThresholdTypes.RoundKind roundKind
     ) external onlyRole(EVALUATOR_ROLE) returns (RoundFinalization.FinalizationRecord memory record) {
         bytes32 id = configStore.roundId(claimId, roundKind);
         if (!configStore.isRoundFrozen(id)) revert RoundNotFrozen(id);
-        if (_finalized[id]) revert AlreadyFinalized(id);
+        // Require prior evaluation -- cannot finalize before evaluate
+        if (!_evaluated[id]) revert NotEvaluated(id);
+        if (_finalized[id])  revert AlreadyFinalized(id);
 
-        // Bind finality to block.timestamp -- caller cannot override
-        if (block.timestamp < uint256(challengeDeadline)) {
-            revert ChallengeWindowStillOpen(id, challengeDeadline);
+        // Read the frozen deadline from the store -- caller cannot supply or override it
+        uint64 deadline = configStore.getChallengeDeadline(id);
+        // deadline == 0 means the legacy freezeRoundConfig() path was used (no deadline set).
+        // In that case finalization is permitted immediately.
+        if (deadline > 0 && block.timestamp < uint256(deadline)) {
+            revert ChallengeWindowStillOpen(id, deadline);
         }
 
+        // Build FinalizationRecord from the stored ThresholdEvaluation
+        ParticipationThresholdTypes.ThresholdEvaluation memory eval = _evaluations[id];
         ParticipationThresholdTypes.FrozenRoundConfig memory config = configStore.getFrozenConfig(id);
 
-        // challengeWindowElapsed = true because we verified above
-        record = RoundFinalization.finalize(weights, config, roundKind, true);
+        // Reconstruct WeightTotals from stored evaluation (source of truth)
+        ParticipationThresholdTypes.WeightTotals memory storedWeights = ParticipationThresholdTypes.WeightTotals({
+            trueWeight:    eval.trueWeight,
+            falseWeight:   eval.falseWeight,
+            verifierCount: 0 // verifierCount is not stored in ThresholdEvaluation;
+                             // it was used only as a threshold gate during evaluation.
+                             // The terminal state and economic outcome are already determined.
+        });
+
+        record = RoundFinalization.finalize(storedWeights, config, roundKind, true);
 
         _finalizations[id] = record;
         _finalized[id] = true;
@@ -153,8 +183,9 @@ contract ParticipationThresholdEngine is AccessControl {
             roundKind,
             record.state,
             record.economic,
-            record.confidenceBps,
-            record.isProvisional
+            eval.trueWeight,
+            eval.falseWeight,
+            record.confidenceBps
         );
     }
 
@@ -182,7 +213,6 @@ contract ParticipationThresholdEngine is AccessControl {
         return _evaluated[roundId];
     }
 
-    /// @notice Return the stored FinalizationRecord for a round.
     function getFinalization(bytes32 roundId)
         external
         view
@@ -191,7 +221,6 @@ contract ParticipationThresholdEngine is AccessControl {
         return _finalizations[roundId];
     }
 
-    /// @notice Whether finalizeRound() has been called for a round.
     function isFinalized(bytes32 roundId) external view returns (bool) {
         return _finalized[roundId];
     }
