@@ -29,6 +29,9 @@ import {ProtocolExecutionBounds} from "../performance/ProtocolExecutionBounds.so
 ///      scoped pause (frozen only at protocol SHUTDOWN); a manager-initiated cancel is an outcome
 ///      decision and additionally fails closed under `SCOPE_SETTLEMENT`.
 contract Claims is ERC165, AccessControl, ReentrancyGuard, IClaims, V2WiredPauseGuard {
+    /// @notice Maximum optional metadata accepted with a claim creation request.
+    uint256 public constant MAX_CLAIM_METADATA_BYTES = 1_024;
+
     using SafeERC20 for IERC20;
 
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
@@ -143,12 +146,15 @@ contract Claims is ERC165, AccessControl, ReentrancyGuard, IClaims, V2WiredPause
     }
 
     /// @inheritdoc IClaims
-    function createClaim(bytes32 subject, uint256 reward, bytes calldata /* metadata */ )
+    function createClaim(bytes32 subject, uint256 reward, bytes calldata metadata)
         external
         override
         nonReentrant
         returns (uint256 claimId)
     {
+        if (metadata.length > MAX_CLAIM_METADATA_BYTES) {
+            revert V2Errors.ClaimMetadataTooLarge(metadata.length, MAX_CLAIM_METADATA_BYTES);
+        }
         _requireScopeNotPaused(PauseMatrix.SCOPE_CLAIMS);
         if (subject == bytes32(0)) revert V2Errors.InvalidClaimSubject();
         AntiGriefing.requireMinAmount(reward, minBounty);

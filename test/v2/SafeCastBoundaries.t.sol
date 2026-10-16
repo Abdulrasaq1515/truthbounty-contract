@@ -456,6 +456,22 @@ contract SafeCastBoundariesTest is Test {
         assertEq(claims.openClaimCount(alice), 2);
     }
 
+    function test_claimMetadataBudgetRejectsOversizedBytes() public {
+        MockERC20 token = new MockERC20("B", "B");
+        Claims claims = _claims(token);
+        bytes memory metadata = new bytes(claims.MAX_CLAIM_METADATA_BYTES() + 1);
+
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                V2Errors.ClaimMetadataTooLarge.selector,
+                metadata.length,
+                claims.MAX_CLAIM_METADATA_BYTES()
+            )
+        );
+        claims.createClaim(keccak256("bounded"), 1 ether, metadata);
+    }
+
     function test_claims_amountBoundary_rewardStoredUnnarrowed() public {
         MockERC20 token = new MockERC20("B", "B");
         Claims claims = _claims(token);

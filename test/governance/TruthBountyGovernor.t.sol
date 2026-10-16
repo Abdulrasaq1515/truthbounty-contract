@@ -321,6 +321,28 @@ contract TruthBountyGovernorTest is Test {
         governor.propose(targets, values, calldatas, "oversized action");
     }
 
+    function test_ProposalRejectsOversizedAggregateCalldata() public {
+        uint256 perOperationLimit = governor.MAX_OPERATION_CALLDATA_BYTES();
+        uint256 count = governor.MAX_PROPOSAL_CALLDATA_BYTES() / perOperationLimit + 1;
+        address[] memory targets = new address[](count);
+        uint256[] memory values = new uint256[](count);
+        bytes[] memory calldatas = new bytes[](count);
+        for (uint256 i; i < count; ++i) {
+            targets[i] = address(module);
+            calldatas[i] = new bytes(perOperationLimit);
+        }
+
+        uint256 aggregateSize = count * perOperationLimit;
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                TruthBountyGovernor.ProposalCalldataTooLarge.selector,
+                aggregateSize,
+                governor.MAX_PROPOSAL_CALLDATA_BYTES()
+            )
+        );
+        governor.propose(targets, values, calldatas, "oversized proposal payload");
+    }
+
     function test_ProposalRejectsOversizedDescription() public {
         address[] memory targets = new address[](1);
         targets[0] = address(module);
