@@ -101,6 +101,7 @@ contract V2ErrorsTest is Test {
         // by checking against known catalog selectors used in stake/settlement paths.
         assertTrue(legacy != V2Errors.InvalidRoundTransfer.selector);
         assertTrue(legacy != V2Errors.ZeroAmount.selector);
+        assertEq(V2Errors.DustStake.selector, bytes4(keccak256("DustStake(uint256,uint256)")));
         assertTrue(legacy != V2Errors.UnauthorizedModule.selector);
     }
 }
