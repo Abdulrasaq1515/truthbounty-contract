@@ -170,7 +170,9 @@ contract VersionRegistry is IVersionRegistry, AccessControl {
         return _contractRegistered[contractName];
     }
 
+    /// @dev V2-SC-160: hashes the raw string bytes directly (byte-identical to the former
+    ///      single-argument packed form) so no packed encoding remains in the upgrade surface.
     function _strEq(string memory a, string memory b) internal pure returns (bool) {
-        return keccak256(abi.encodePacked(a)) == keccak256(abi.encodePacked(b));
+        return keccak256(bytes(a)) == keccak256(bytes(b));
     }
 }

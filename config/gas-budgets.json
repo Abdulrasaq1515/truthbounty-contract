@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "issue": "V2-SC-038",
+  "issue": "V2-SC-072",
   "referenceBlockGasLimit": 30000000,
   "recommendedTxGasCeiling": 12000000,
   "budgets": {
@@ -12,7 +12,10 @@
     "CHALLENGE_OPEN": 120000,
     "APPEAL_SETTLEMENT": 650000,
     "FINALIZATION": 200000,
-    "WITHDRAWAL": 120000
+    "WITHDRAWAL": 120000,
+    "REWARD_CLAIM": 450000,
+    "GOVERNANCE_CONFIGURATION": 120000,
+    "EMERGENCY_PAUSE": 180000
   },
   "bounds": {
     "MAX_VERIFIERS_PER_CLAIM": 200,

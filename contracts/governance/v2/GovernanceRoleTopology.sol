@@ -7,8 +7,7 @@ import {TruthBountyGovernor} from "./TruthBountyGovernor.sol";
 /**
  * @title GovernanceRoleTopology
  * @notice Wires production role topology between governor and timelock (V2-SC-026 dependency).
- * @dev Guardian receives canceller rights on the timelock only; it cannot propose or execute.
- *      The governor is the sole proposer. Execution is permissionless after the timelock delay.
+ * @dev Guardian receives an individual canceller role grant on the timelock; the governor is the sole proposer. Execution is permissionless after the timelock delay.
  */
 library GovernanceRoleTopology {
     bytes32 internal constant PROPOSER_ROLE = keccak256("PROPOSER_ROLE");
@@ -16,6 +15,11 @@ library GovernanceRoleTopology {
     bytes32 internal constant CANCELLER_ROLE = keccak256("CANCELLER_ROLE");
     bytes32 internal constant TIMELOCK_ADMIN_ROLE = keccak256("TIMELOCK_ADMIN_ROLE");
 
+    /// @notice Emitted after the timelock role topology is configured.
+    /// @param timelock Timelock receiving roles.
+    /// @param governor Governor receiving proposer and canceller rights.
+    /// @param guardian Guardian receiving cancellation rights.
+    /// @param minDelay Configured timelock minimum delay in seconds.
     event GovernanceTopologyConfigured(
         address indexed timelock,
         address indexed governor,
@@ -25,6 +29,10 @@ library GovernanceRoleTopology {
 
     /**
      * @dev Assign canonical timelock roles after governor deployment.
+     * @param timelock Timelock receiving the role topology.
+     * @param governor Governor receiving proposer and canceller rights.
+     * @param guardian Guardian receiving an individual canceller-only role grant.
+     * @param minDelay Configured minimum execution delay in seconds.
      */
     function configure(
         TimelockController timelock,
@@ -42,6 +50,8 @@ library GovernanceRoleTopology {
 
     /**
      * @dev Hand timelock self-administration to the timelock itself after bootstrap.
+     * @param timelock Timelock whose administrator role is finalized.
+     * @param currentAdmin Bootstrap administrator whose role is revoked.
      */
     function finalizeTimelockAdmin(TimelockController timelock, address currentAdmin) internal {
         timelock.grantRole(TIMELOCK_ADMIN_ROLE, address(timelock));

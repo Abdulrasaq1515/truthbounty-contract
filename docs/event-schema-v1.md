@@ -85,3 +85,14 @@ The canonical event declarations are defined in `contracts/interfaces/ITruthBoun
     - `UpgradeApprovedV1`: proposal ID, module ID, execute after, approver, timestamp, version.
     - `UpgradeExecutedV1`: proposal ID, module ID, old implementation, new implementation, executor, timestamp, version.
     - `UpgradeRolledBackV1`: module ID, old implementation, restored implementation, reason hash, guardian, timestamp, version.
+
+## Appeal Domain (SC-017) Event Schemas
+
+Emitted by `AppealVerificationRound`; these are modular events (separate from the `V1` canonical families above). Schemas reflect V2-SC-059 (bounded ladder, bond-gated opening, terminality).
+
+- `AppealRoundOpened`: claim ID, deadline, min stake, multiplier BPS, opened by, round index, max rounds, required bond, bond lock ID.
+- `AppealVoteSubmitted`: claim ID, verifier, support flag, stake amount, effective weight.
+- `AppealRoundClosed`: claim ID, total true weight, total false weight, verifier count, closed by, round index.
+- `AppealPathFinalized`: claim ID, round index, total true weight, total false weight, verifier count. *(new in V2-SC-059)*
+- `DefaultAppealConfigUpdated`: duration, min stake, multiplier BPS, max weight cap, max appeal rounds, appeal bond, appeal bond escalation BPS, max appeal bond, max voters per round.
+- `VaultUpdated`: old vault, new vault.

@@ -76,6 +76,12 @@ Enforced at `approveUpgrade`:
 - A **storage-incompatible** upgrade **must** carry a validated **migration** (`migrationHash`
   ≠ 0 and validated). This makes layout-breaking changes explicit and reviewed.
 
+Since V2-SC-121 there is an additional **pre-approval gate**: the compiled storage layout of
+every upgradeable contract is frozen in `storage-layouts/manifest.json` and CI fails on
+unapproved drift (see [storage-layout manifests](./storage-layout-manifests.md). Layout drift
+is therefore reviewed at the pull request that introduces it, long before any upgrade
+proposal references the implementation.
+
 ## Roles
 
 | Role | Capability |

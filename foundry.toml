@@ -1,9 +1,15 @@
 [profile.default]
-src = "test"
+src = "contracts"
 out = "out"
 libs = ["lib"]
 test = "test"
 cache_path = "cache"
+fs_permissions = [{ access = "read", path = "./" }]
+
+# V2-SC-129: pin the exact compiler so every rebuild is byte-identical.
+# Must match hardhat.config.ts, scripts/canonicalV2Manifest.ts, and
+# deployments/releases/v2-sc-129-release-manifest.json.
+solc = "0.8.28"
 
 # See more config options https://github.com/foundry-rs/foundry/tree/master/config
 
@@ -13,14 +19,28 @@ via_ir = true
 auto_detect_remappings = false
 remappings = [
     "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
-    "@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/",
+    "@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/",
     "forge-std/=lib/forge-std/src/",
-    "../../contracts/=contracts/",
-    "../contracts/=contracts/",
+    "contracts/=contracts/",
+    "contracts/settlement/=contracts/settlement/",
+    "contracts/disputes/=contracts/disputes/",
+    "contracts/governance/=contracts/governance/",
+    "contracts/upgrade/=contracts/upgrade/",
+    "contracts/libraries/=contracts/libraries/",
+    "contracts/interfaces/=contracts/interfaces/",
+    "contracts/mocks/=contracts/mocks/",
+    "contracts-vrm/=contracts-vrm/",
 ]
 
+
 [profile.default.model_checker]
-contracts = { "contracts/WeightedStaking.sol" = [ "WeightedStaking" ], "contracts/staking.sol" = [ "Staking" ] }
+contracts = {
+    "contracts/WeightedStaking.sol" = [ "WeightedStaking" ],
+    "contracts/staking.sol" = [ "Staking" ],
+    "contracts/TruthBounty.sol" = [ "TruthBounty" ],
+    "contracts/governance/EmergencyController.sol" = [ "EmergencyController" ],
+    "contracts/upgrade/ProtocolUpgradeManager.sol" = [ "ProtocolUpgradeManager" ]
+}
 engine = "chc"
 timeout = 10000
 targets = [ "assert" ]
@@ -31,8 +51,38 @@ tab_width = 4
 bracket_spacing = true
 int_types = "long"
 
-
 [invariant]
 runs = 500
 depth = 20
 fail_on_revert = false
+
+[profile.default.fuzz]
+runs = 1000
+depth = 256
+
+[profile.default.invariant]
+runs = 500
+depth = 20
+fail_on_revert = false
+[coverage]
+# Coverage quality gates - enforce minimum thresholds to prevent superficial tests
+# from satisfying critical-path requirements
+line_threshold = 85
+branch_threshold = 80
+function_threshold = 90
+
+# Exclude mocks, tests, and generated files from coverage
+skip = [
+    "test/**",
+    "script/**",
+    "contracts/mocks/**",
+    "contracts/test/**",
+    "contracts/bootstrap/**",
+    "contracts/upgrade/**",
+    "contracts/performance/**",
+    "lib/**",
+    "@openzeppelin/**",
+]
+
+# Report format
+reports = ["lcov", "summary", "json"]

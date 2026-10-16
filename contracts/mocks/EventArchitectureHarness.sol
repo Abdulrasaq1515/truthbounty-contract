@@ -3,10 +3,11 @@ pragma solidity ^0.8.20;
 
 import "../interfaces/ITruthBountyEvents.sol";
 import "../libraries/CanonicalEventLibrary.sol";
+import "../interfaces/IVerificationRoundEvents.sol";
 
 /// @title EventArchitectureHarness
 /// @notice Test harness exposing explicit emitters for all 16 canonical event families.
-contract EventArchitectureHarness is ITruthBountyEvents {
+contract EventArchitectureHarness is ITruthBountyEvents, IVerificationRoundEvents {
     uint16 public constant EVENT_SCHEMA_VERSION = 1;
 
     // 1. Claims
@@ -132,6 +133,31 @@ contract EventArchitectureHarness is ITruthBountyEvents {
     }
 
     // 5. Rounds
+
+    function emitRoundOpenedV1(
+        uint256 claimId,
+        uint256 roundId,
+        uint8 roundType,
+        uint64 startedAt,
+        uint64 deadline,
+        uint256 minStake,
+        uint256 maxStake,
+        uint256 weightCap,
+        uint16 passingThreshold,
+        uint32 paramVersion
+    ) external {
+        emit RoundOpened(claimId, roundId, roundType, startedAt, deadline, minStake, maxStake, weightCap, passingThreshold, paramVersion);
+    }
+
+    function emitRoundClosedV1(
+        uint256 claimId,
+        uint256 roundId,
+        uint64 closedAt,
+        uint256 totalVotes
+    ) external {
+        emit RoundClosed(claimId, roundId, closedAt, totalVotes);
+    }
+
     function emitRoundStartedV1(
         uint256 claimId,
         uint256 round,
