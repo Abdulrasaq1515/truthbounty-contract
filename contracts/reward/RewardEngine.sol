@@ -188,6 +188,17 @@ contract RewardEngine is ReentrancyGuard, Pausable, GovernanceOwnable, ITruthBou
     event BatchRewardAllocationCompleted(uint256 count);
     event BatchRewardClaimCompleted(address indexed recipient, uint256 count, uint256 amount);
 
+    /// @notice Emitted when an immediate payout inside `allocateRewardsBatch` could not be
+    ///         delivered to a hostile, reverting or false-returning recipient and was
+    ///         therefore recorded as a pull (claimable) credit instead. The reward remains
+    ///         owed exactly once and the recipient can claim it later; the failure is
+    ///         isolated and never blocks the other rows of the batch (SC-051).
+    event RewardAllocationDeferred(
+        address indexed recipient,
+        bytes32 indexed distributionId,
+        uint256 amount
+    );
+
     event RewardMultiplierUpdated(
         bytes32 indexed multiplier,
         uint256 oldValue,
@@ -254,6 +265,8 @@ contract RewardEngine is ReentrancyGuard, Pausable, GovernanceOwnable, ITruthBou
     error UnauthorizedRewardClaim();
     error InvalidDistributionBatch();
     error DistributionBatchTooLarge(uint256 provided, uint256 maximum);
+    /// @notice Only self-calls may reach the batch isolation trampoline.
+    error SelfCallOnly();
 
     // ============ Constructor ============
 
@@ -593,14 +606,64 @@ contract RewardEngine is ReentrancyGuard, Pausable, GovernanceOwnable, ITruthBou
         }
 
         for (uint256 i = 0; i < length;) {
-            _allocateReward(
-                recipients[i],
-                claimIds[i],
-                settlementIds[i],
-                calculationIds_[i],
-                amounts[i],
-                immediate[i]
-            );
+            address recipient = recipients[i];
+            uint256 claimId = claimIds[i];
+            bytes32 settlementId = settlementIds[i];
+            bytes32 calculationId = calculationIds_[i];
+            uint256 amount = amounts[i];
+
+            if (immediate[i]) {
+                // SC-051: isolate immediate payouts. A hostile, reverting or
+                // false-returning recipient must never block the other rows of the
+                // batch. We route the per-row allocation through an external
+                // trampoline so a failed token transfer can be caught.
+                try this._allocateRewardExternal(
+                    recipient,
+                    claimId,
+                    settlementId,
+                    calculationId,
+                    amount,
+                    true
+                ) {
+                    // Row recorded and paid immediately.
+                } catch {
+                    // The immediate transfer failed. Fall back to a pull credit so the
+                    // reward remains owed exactly once and the recipient can claim it
+                    // later once the failure is resolved. Deterministic input errors
+                    // (duplicate settlement, insufficient pool, zero amount) also fail
+                    // this fallback and therefore still revert the batch fail-closed.
+                    _allocateReward(
+                        recipient,
+                        claimId,
+                        settlementId,
+                        calculationId,
+                        amount,
+                        false
+                    );
+
+                    emit RewardAllocationDeferred(
+                        recipient,
+                        keccak256(
+                            abi.encode(
+                                recipient,
+                                claimId,
+                                settlementId,
+                                calculationId
+                            )
+                        ),
+                        amount
+                    );
+                }
+            } else {
+                _allocateReward(
+                    recipient,
+                    claimId,
+                    settlementId,
+                    calculationId,
+                    amount,
+                    false
+                );
+            }
 
             unchecked {
                 ++i;
@@ -790,6 +853,30 @@ contract RewardEngine is ReentrancyGuard, Pausable, GovernanceOwnable, ITruthBou
             claimId,
             settlementId,
             distributionId,
+            amount,
+            immediate
+        );
+    }
+
+    /**
+     * @dev External trampoline around `_allocateReward` used by `allocateRewardsBatch`
+     *      so that a reverting or false-returning recipient can be isolated with
+     *      `try/catch`. Guarded to self-calls so it cannot be invoked externally.
+     */
+    function _allocateRewardExternal(
+        address recipient,
+        uint256 claimId,
+        bytes32 settlementId,
+        bytes32 calculationId,
+        uint256 amount,
+        bool immediate
+    ) external returns (bytes32 distributionId) {
+        if (msg.sender != address(this)) revert SelfCallOnly();
+        distributionId = _allocateReward(
+            recipient,
+            claimId,
+            settlementId,
+            calculationId,
             amount,
             immediate
         );

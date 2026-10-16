@@ -78,9 +78,25 @@ interface IRewardDeferralQueue {
     );
 
     /**
+     * @notice Emitted when a queued reward could not be delivered because the recipient
+     *         rejected the transfer (hostile / reverting / false-returning). The entry is
+     *         left PENDING — it remains owed exactly once and can be retried
+     *         permissionlessly once the recipient can receive tokens (SC-051).
+     * @param queueId   The queue entry that could not be fulfilled.
+     * @param recipient Address whose transfer failed.
+     * @param amount    Token amount still owed.
+     */
+    event RewardFulfillmentDeferred(
+        bytes32 indexed queueId,
+        address indexed recipient,
+        uint256 amount
+    );
+
+    /**
      * @notice Emitted after a fulfillBatch call completes.
      * @param processed Number of entries successfully fulfilled.
-     * @param failed    Number of entries that could not be fulfilled (pool still insufficient).
+     * @param failed    Number of entries that could not be fulfilled (pool still
+     *                  insufficient, or the recipient rejected the transfer).
      */
     event BatchFulfillCompleted(uint256 processed, uint256 failed);
 
@@ -143,7 +159,9 @@ interface IRewardDeferralQueue {
 
     /**
      * @notice Fulfill multiple queued rewards in a single transaction.
-     *         Bounded by MAX_BATCH. Reverts on entries that cannot be fulfilled.
+     *         Bounded by MAX_BATCH. Entries are processed independently: an entry that
+     *         cannot be delivered (insufficient pool balance or a recipient that rejects
+     *         the transfer) is left PENDING and does not block the remaining entries.
      * @param queueIds Array of queue entry identifiers to fulfill.
      */
     function fulfillBatch(bytes32[] calldata queueIds) external;
