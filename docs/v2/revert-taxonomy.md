@@ -30,6 +30,17 @@ share a name but differ by ABI.
 | Silent `uint64(block.timestamp)` / `uintN(x)` truncation | `SafeCastOverflow(field, value, max)` via `V2SafeCast` (V2-SC-161) |
 | Silent `uint256(int256)` sign flip | `SafeCastNegative(field, value)` via `V2SafeCast` (V2-SC-161) |
 
+## Stake amount errors (V2-SC-018)
+
+`StakeVault.depositStake` validates the amount in this order: zero reverts with
+`ZeroAmount()`, then any positive amount below `minStakeAmount` reverts with
+`DustStake(provided, minimum)`. Both selectors are canonical entries in
+`V2Errors`; callers can distinguish invalid zero input from a positive stake
+below the configured per-deposit floor. Other stake mutations reject zero with
+`ZeroAmount()` and enforce available-balance bounds with `InsufficientLocked`
+or `InsufficientClaimable` rather than applying the deposit floor again. See
+[`stake-amount-semantics-v2-sc-018.md`](stake-amount-semantics-v2-sc-018.md).
+
 ## Integer-width boundaries (V2-SC-161)
 
 `SafeCastOverflow(bytes32 field, uint256 value, uint256 max)` and

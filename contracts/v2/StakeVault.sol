@@ -212,6 +212,7 @@ contract StakeVault is ERC165, AccessControl, ReentrancyGuard, IStakeCustody, V2
     /// @inheritdoc IStakeCustody
     function depositStake(uint256 claimId, uint256 amount) external override nonReentrant {
         _requireScopeNotPaused(PauseMatrix.SCOPE_STAKING);
+        if (amount == 0) revert V2Errors.ZeroAmount();
         if (amount < minStakeAmount) revert V2Errors.DustStake(amount, minStakeAmount);
         _assertSettlementNotFinalized(claimId, 0);
         address asset = address(stakingToken);

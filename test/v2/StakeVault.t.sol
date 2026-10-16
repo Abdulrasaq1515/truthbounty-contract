@@ -298,6 +298,46 @@ contract StakeVaultTest is Test {
         vault.depositStake(CLAIM_A, 0);
     }
 
+    function test_zeroStakeMutationsUseCanonicalZeroAmountError() public {
+        vm.prank(verifier);
+        vault.depositStake(CLAIM_A, STAKE);
+
+        vm.prank(settlement);
+        vm.expectRevert(V2Errors.ZeroAmount.selector);
+        vault.releaseStake(CLAIM_A, verifier, 0);
+
+        vm.prank(slashing);
+        vm.expectRevert(V2Errors.ZeroAmount.selector);
+        vault.slashStake(CLAIM_A, verifier, 0, keccak256("zero-slash"));
+
+        vm.prank(settlement);
+        vm.expectRevert(V2Errors.ZeroAmount.selector);
+        vault.carryForwardAppeal(address(token), verifier, CLAIM_A, 0, 1, 0);
+
+        assertEq(vault.staked(CLAIM_A, verifier), STAKE, "failed zero mutations changed stake");
+        (uint256 custody, uint256 obligations) = vault.reconcile(address(token));
+        assertEq(custody, obligations, "zero mutations broke reconciliation");
+    }
+
+    function test_depositStake_enforcesMinimumBoundary() public {
+        uint256 minimum = vault.minStakeAmount();
+        uint256 custodyBefore = vault.totalCustody(address(token));
+
+        vm.prank(verifier);
+        vm.expectRevert(abi.encodeWithSelector(V2Errors.DustStake.selector, minimum - 1, minimum));
+        vault.depositStake(CLAIM_A, minimum - 1);
+        assertEq(vault.totalCustody(address(token)), custodyBefore, "rejected dust deposit changed custody");
+        assertEq(vault.staked(CLAIM_A, verifier), 0, "rejected dust deposit changed stake");
+
+        vm.prank(verifier);
+        vault.depositStake(CLAIM_A, minimum);
+        assertEq(vault.staked(CLAIM_A, verifier), minimum);
+
+        vm.prank(verifier2);
+        vault.depositStake(CLAIM_B, minimum + 1);
+        assertEq(vault.staked(CLAIM_B, verifier2), minimum + 1);
+    }
+
     function test_unsupportedAssetReverts() public {
         MockERC20 unsupported = new MockERC20("X", "X");
         unsupported.mint(verifier, STAKE);
