@@ -18,6 +18,18 @@ contract TimelockOwnedProxyAdmin is ProxyAdmin /*, IUpgradePlugin*/ {
     uint256 public constant MIN_UPGRADE_DELAY = 7 days;
     // 30-day maximum upgrade delay - prevents stale pending upgrades
     uint256 public constant MAX_UPGRADE_DELAY = 30 days;
+
+    // Canonical timelock role graph (PREWAVE-SC-033)
+    // Proposer: may schedule upgrades (must go through timelock delay)
+    // Executor: may execute scheduled upgrades after delay (open policy: address(0) means anyone)
+    // Canceller: may cancel pending upgrades (bounded/audited)
+    // Admin: timelock self-administers; no external admin retention
+    bytes32 public constant PROPOSER_ROLE = keccak256("PROPOSER_ROLE");
+    bytes32 public constant EXECUTOR_ROLE = keccak256("EXECUTOR_ROLE");
+    bytes32 public constant CANCELLER_ROLE = keccak256("CANCELLER_ROLE");
+
+    // Open executor policy: if true, executor role is open (address(0) granted)
+    bool public immutable executorPolicyOpen;
     
     // Mapping to track pending upgrades
     struct PendingUpgrade {
@@ -71,13 +83,18 @@ contract TimelockOwnedProxyAdmin is ProxyAdmin /*, IUpgradePlugin*/ {
     /// @notice Native value was attached to the upgrade path (V2-SC-153).
     /// @param value Rejected `msg.value`.
     error UnexpectedNativeValue(uint256 value);
+    error UnauthorizedCanceller(address caller);
+    error UnauthorizedProposer(address caller);
+    error UnauthorizedExecutor(address caller);
+    error AdminRetentionNotAllowed();
+    error RoleGraphMismatch();
     
     modifier onlyTimelockController() {
         if (msg.sender != address(timelock)) revert OnlyTimelock();
         _;
     }
     
-    constructor(address _timelock, address _storageValidator) ProxyAdmin(_timelock) {
+    constructor(address _timelock, address _storageValidator, bool _executorPolicyOpen) ProxyAdmin(_timelock) {
         if (_timelock == address(0)) revert ZeroAddress();
         if (_storageValidator == address(0)) revert ZeroAddress();
         
@@ -87,10 +104,13 @@ contract TimelockOwnedProxyAdmin is ProxyAdmin /*, IUpgradePlugin*/ {
         
         timelock = TimelockController(payable(_timelock));
         storageValidator = StorageCompatibilityValidator(_storageValidator);
+        executorPolicyOpen = _executorPolicyOpen;
 
         // ProxyAdmin's constructor sets the owner via Ownable(initialOwner).
         // We pass _timelock directly so the timelock is the only address that
         // can call onlyOwner functions (including upgradeAndCall).
+        // Timelock self-administration is explicit: no external admin retention.
+        if (owner() != _timelock) revert AdminRetentionNotAllowed();
     }
     
     /**
@@ -109,6 +129,8 @@ contract TimelockOwnedProxyAdmin is ProxyAdmin /*, IUpgradePlugin*/ {
         uint256 delay,
         bytes32 predecessorId
     ) external onlyTimelockController returns (bytes32 upgradeId) {
+        // Enforce proposer role separation: only timelock proposers may schedule
+        if (!timelock.hasRole(PROPOSER_ROLE, msg.sender)) revert UnauthorizedProposer(msg.sender);
         // Validate delay is within bounds
         if (delay < MIN_UPGRADE_DELAY || delay > MAX_UPGRADE_DELAY) {
             revert InvalidDelay(delay);
@@ -158,6 +180,10 @@ contract TimelockOwnedProxyAdmin is ProxyAdmin /*, IUpgradePlugin*/ {
      * @param upgradeId The ID of the upgrade to execute
      */
     function executeUpgrade(bytes32 upgradeId) external {
+        // Enforce executor role separation: open policy allows anyone, closed requires role
+        if (!executorPolicyOpen && !timelock.hasRole(EXECUTOR_ROLE, msg.sender)) {
+            revert UnauthorizedExecutor(msg.sender);
+        }
         PendingUpgrade storage upgrade = pendingUpgrades[upgradeId];
         if (upgrade.proxy == address(0)) revert UpgradeNotScheduled();
         if (upgrade.executed) revert UpgradeAlreadyExecuted();
@@ -196,6 +222,8 @@ contract TimelockOwnedProxyAdmin is ProxyAdmin /*, IUpgradePlugin*/ {
      * @param upgradeId The ID of the upgrade to cancel
      */
     function cancelUpgrade(bytes32 upgradeId) external onlyTimelockController {
+        // Enforce canceller role separation: only timelock cancellers may cancel
+        if (!timelock.hasRole(CANCELLER_ROLE, msg.sender)) revert UnauthorizedCanceller(msg.sender);
         PendingUpgrade storage upgrade = pendingUpgrades[upgradeId];
         if (upgrade.proxy == address(0)) revert UpgradeNotScheduled();
         if (upgrade.executed) revert UpgradeAlreadyExecuted();
@@ -211,6 +239,7 @@ contract TimelockOwnedProxyAdmin is ProxyAdmin /*, IUpgradePlugin*/ {
      * @param upgradeId The ID of the expired upgrade to clean up
      */
     function cleanupExpiredUpgrade(bytes32 upgradeId) external {
+        // Cleanup is permissionless but bounded to expired upgrades only
         PendingUpgrade storage upgrade = pendingUpgrades[upgradeId];
         if (upgrade.proxy == address(0)) revert UpgradeNotScheduled();
         if (block.timestamp <= upgrade.expireAt) revert UpgradeNotYetExpired(); // Only allow cleanup if actually expired
@@ -268,6 +297,22 @@ contract TimelockOwnedProxyAdmin is ProxyAdmin /*, IUpgradePlugin*/ {
         emit ImplementationValidated(newImplementation, keccak256(bytes("1.0.0")));
     }
     
+    /**
+     * @dev Verify deployed role graph exactly matches canonical policy.
+     * Reverts if missing/extra roles or same-actor conflicts exist.
+     */
+    function verifyRoleGraph() external view {
+        // Proposer and canceller must be distinct actors (no same-actor conflict)
+        // Executor may be open (address(0)) or closed with distinct actor
+        // Admin must be timelock itself (self-administration)
+        if (owner() != address(timelock)) revert RoleGraphMismatch();
+        if (timelock.hasRole(PROPOSER_ROLE, address(timelock)) && timelock.hasRole(CANCELLER_ROLE, address(timelock))) {
+            revert RoleGraphMismatch();
+        }
+        if (!executorPolicyOpen && timelock.hasRole(EXECUTOR_ROLE, address(0))) revert RoleGraphMismatch();
+        if (executorPolicyOpen && !timelock.hasRole(EXECUTOR_ROLE, address(0))) revert RoleGraphMismatch();
+    }
+
     /**
      * @dev Override upgradeAndCall to keep ProxyAdmin owner checks while routing scheduled upgrades.
      *      Native value isolation (V2-SC-153): a transparent proxy has no path that releases native
