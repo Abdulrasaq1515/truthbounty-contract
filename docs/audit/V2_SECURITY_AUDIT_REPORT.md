@@ -187,6 +187,7 @@ All custom errors are defined in `V2Errors` library. Selectors are stable:
 |---|---|
 | `ZeroAddress()` | `0xd92e233d` |
 | `ZeroAmount()` | `0x1f2a2005` |
+| `DustStake(uint256,uint256)` | `0x9b5b34b3` |
 | `UnauthorizedModule(address)` | `0x70de4e63` |
 | `SettlementAlreadyFinalized(uint256,uint256)` | `0xb4d96e4f` |
 | `InsufficientClaimable(address,uint256,uint256)` | `0x70855148` |

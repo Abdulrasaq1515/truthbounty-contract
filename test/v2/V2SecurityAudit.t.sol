@@ -549,7 +549,7 @@ contract V2_StateTransition_Tests is Test {
     /// @notice SC-STATE-006: carryForwardAppeal with same fromRound==toRound reverts.
     function test_carryForwardAppeal_sameRoundReverts() public {
         vm.prank(settlement);
-        vm.expectRevert(abi.encodeWithSelector(V2Errors.InvalidArgument.selector, "same round"));
+        vm.expectRevert(abi.encodeWithSelector(V2Errors.InvalidRoundTransfer.selector, uint256(0), uint256(0)));
         vault.carryForwardAppeal(address(token), verifier, CLAIM_A, 0, 0, STAKE);
     }
 

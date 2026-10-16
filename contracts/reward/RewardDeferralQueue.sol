@@ -189,11 +189,47 @@ contract RewardDeferralQueue is IRewardDeferralQueue, AccessControl, ReentrancyG
                 continue;
             }
 
-            // Perform the actual fulfillment.
-            _fulfillStorageEntry(id, entry);
+            // Perform the actual fulfillment in isolation. A hostile or
+            // false-returning recipient must not revert the whole batch and block
+            // every other entry (SC-051).
+            address recipient = entry.recipient;
+            uint256 amount = entry.amount;
+            uint256 claimId = entry.claimId;
+            bytes32 settlementId = entry.settlementId;
+            bytes32 calculationId = entry.calculationId;
+
+            // CEI: mark before the external call so reentrancy cannot double-fulfill.
+            entry.status = QueueStatus.FULFILLED;
+            unchecked {
+                ++totalFulfilled;
+            }
+
+            try engine.allocateReward(
+                recipient,
+                claimId,
+                settlementId,
+                calculationId,
+                amount,
+                true
+            ) {
+                emit RewardFulfilled(id, recipient, amount);
+                unchecked {
+                    ++processed;
+                }
+            } catch {
+                // Delivery failed. Restore PENDING so the entitlement is preserved
+                // (owed exactly once) and can be retried by anyone once the recipient
+                // can receive tokens. The engine call is atomic: a reverted attempt
+                // leaves no on-chain record, so the retry cannot double-pay.
+                entry.status = QueueStatus.PENDING;
+                unchecked {
+                    --totalFulfilled;
+                    ++failed;
+                }
+                emit RewardFulfillmentDeferred(id, recipient, amount);
+            }
 
             unchecked {
-                ++processed;
                 ++i;
             }
         }
