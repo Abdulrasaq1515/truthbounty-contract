@@ -5,6 +5,7 @@ pragma solidity ^0.8.20;
 /// @dev Each hop authenticates its immediate caller and forwards the correlation id
 ///      unchanged. Reverts at any depth roll back every event and storage write.
 abstract contract CorrelatedFixtureModule {
+    error InjectedFailure(uint8 stage);
     error UnauthorizedCaller(address caller);
     error ZeroAddress();
     error ZeroCorrelationId();
@@ -29,6 +30,10 @@ abstract contract CorrelatedFixtureModule {
     function _recordEntry(bytes32 correlationId, uint256 claimId) internal {
         lastEnteredClaim[correlationId] = claimId;
     }
+
+    function _failAt(uint8 stage, uint8 failAt) internal pure {
+        if (failAt == stage) revert InjectedFailure(stage);
+    }
 }
 
 contract TreasuryOrderingFixture is CorrelatedFixtureModule {
@@ -37,10 +42,10 @@ contract TreasuryOrderingFixture is CorrelatedFixtureModule {
 
     constructor(address upstream_) CorrelatedFixtureModule(upstream_) {}
 
-    function reconcile(bytes32 correlationId, uint256 claimId, bool fail) external onlyUpstream(correlationId) {
+    function reconcile(bytes32 correlationId, uint256 claimId, uint8 failAt) external onlyUpstream(correlationId) {
         _recordEntry(correlationId, claimId);
         emit ModuleEntered(correlationId, MODULE_ID, claimId);
-        if (fail) revert("TREASURY_FAILURE");
+        _failAt(6, failAt);
         reconciledClaim[correlationId] = claimId;
         emit ModuleCompleted(correlationId, MODULE_ID, claimId);
     }
@@ -55,10 +60,11 @@ contract RewardsOrderingFixture is CorrelatedFixtureModule {
         downstream = downstream_;
     }
 
-    function allocate(bytes32 correlationId, uint256 claimId, bool fail) external onlyUpstream(correlationId) {
+    function allocate(bytes32 correlationId, uint256 claimId, uint8 failAt) external onlyUpstream(correlationId) {
         _recordEntry(correlationId, claimId);
         emit ModuleEntered(correlationId, MODULE_ID, claimId);
-        downstream.reconcile(correlationId, claimId, fail);
+        _failAt(5, failAt);
+        downstream.reconcile(correlationId, claimId, failAt);
         emit ModuleCompleted(correlationId, MODULE_ID, claimId);
     }
 }
@@ -72,10 +78,11 @@ contract SettlementOrderingFixture is CorrelatedFixtureModule {
         downstream = downstream_;
     }
 
-    function settle(bytes32 correlationId, uint256 claimId, bool fail) external onlyUpstream(correlationId) {
+    function settle(bytes32 correlationId, uint256 claimId, uint8 failAt) external onlyUpstream(correlationId) {
         _recordEntry(correlationId, claimId);
         emit ModuleEntered(correlationId, MODULE_ID, claimId);
-        downstream.allocate(correlationId, claimId, fail);
+        _failAt(4, failAt);
+        downstream.allocate(correlationId, claimId, failAt);
         emit ModuleCompleted(correlationId, MODULE_ID, claimId);
     }
 }
@@ -89,10 +96,11 @@ contract CustodyOrderingFixture is CorrelatedFixtureModule {
         downstream = downstream_;
     }
 
-    function release(bytes32 correlationId, uint256 claimId, bool fail) external onlyUpstream(correlationId) {
+    function release(bytes32 correlationId, uint256 claimId, uint8 failAt) external onlyUpstream(correlationId) {
         _recordEntry(correlationId, claimId);
         emit ModuleEntered(correlationId, MODULE_ID, claimId);
-        downstream.settle(correlationId, claimId, fail);
+        _failAt(3, failAt);
+        downstream.settle(correlationId, claimId, failAt);
         emit ModuleCompleted(correlationId, MODULE_ID, claimId);
     }
 }
@@ -106,10 +114,11 @@ contract ClaimsOrderingFixture is CorrelatedFixtureModule {
         downstream = downstream_;
     }
 
-    function finalize(bytes32 correlationId, uint256 claimId, bool fail) external onlyUpstream(correlationId) {
+    function finalize(bytes32 correlationId, uint256 claimId, uint8 failAt) external onlyUpstream(correlationId) {
         _recordEntry(correlationId, claimId);
         emit ModuleEntered(correlationId, MODULE_ID, claimId);
-        downstream.release(correlationId, claimId, fail);
+        _failAt(2, failAt);
+        downstream.release(correlationId, claimId, failAt);
         emit ModuleCompleted(correlationId, MODULE_ID, claimId);
     }
 }
@@ -135,7 +144,7 @@ contract GovernanceOrderingFixture {
         downstream = downstream_;
     }
 
-    function execute(bytes32 correlationId, uint256 claimId, bool fail) external {
+    function execute(bytes32 correlationId, uint256 claimId, uint8 failAt) external {
         if (msg.sender != timelock) revert UnauthorizedCaller(msg.sender);
         if (correlationId == bytes32(0)) revert ZeroCorrelationId();
         if (consumed[correlationId]) revert CorrelationAlreadyConsumed(correlationId);
@@ -143,7 +152,8 @@ contract GovernanceOrderingFixture {
         consumed[correlationId] = true;
         lastEnteredClaim[correlationId] = claimId;
         emit ModuleEntered(correlationId, MODULE_ID, claimId);
-        downstream.finalize(correlationId, claimId, fail);
+        if (failAt == 1) revert CorrelatedFixtureModule.InjectedFailure(1);
+        downstream.finalize(correlationId, claimId, failAt);
         emit ModuleCompleted(correlationId, MODULE_ID, claimId);
     }
 }

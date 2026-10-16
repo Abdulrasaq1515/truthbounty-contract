@@ -49,7 +49,7 @@ contract V2SC133EventOrderingTest is Test {
     function test_exactNestedOrderingAndCorrelation() public {
         bytes32 correlationId = keccak256("settlement/claim/7/round/0");
         vm.recordLogs();
-        governance.execute(correlationId, 7, false);
+        governance.execute(correlationId, 7, 0);
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
         assertEq(logs.length, 12);
@@ -72,9 +72,9 @@ contract V2SC133EventOrderingTest is Test {
 
     function test_replayRejectedWithoutAdditionalLogs() public {
         bytes32 correlationId = keccak256("one-shot");
-        governance.execute(correlationId, 1, false);
+        governance.execute(correlationId, 1, 0);
         vm.expectRevert(abi.encodeWithSelector(GovernanceOrderingFixture.CorrelationAlreadyConsumed.selector, correlationId));
-        governance.execute(correlationId, 1, false);
+        governance.execute(correlationId, 1, 0);
     }
 
     function test_unauthorizedGovernanceAndNestedCallsFailClosed() public {
@@ -82,7 +82,7 @@ contract V2SC133EventOrderingTest is Test {
         address attacker = address(0xBAD);
         vm.prank(attacker);
         vm.expectRevert(abi.encodeWithSelector(GovernanceOrderingFixture.UnauthorizedCaller.selector, attacker));
-        governance.execute(correlationId, 1, false);
+        governance.execute(correlationId, 1, 0);
 
         vm.expectRevert(abi.encodeWithSelector(CorrelatedFixtureModule.UnauthorizedCaller.selector, address(this)));
         claims.finalize(correlationId, 1, false);
@@ -91,7 +91,7 @@ contract V2SC133EventOrderingTest is Test {
 
     function test_zeroCorrelationRejected() public {
         vm.expectRevert(GovernanceOrderingFixture.ZeroCorrelationId.selector);
-        governance.execute(bytes32(0), 1, false);
+        governance.execute(bytes32(0), 1, 0);
     }
 
     function test_zeroAddressDependenciesRejected() public {
@@ -103,30 +103,32 @@ contract V2SC133EventOrderingTest is Test {
     }
 
     function test_nestedFailureRollsBackEventsAndStorage() public {
-        bytes32 correlationId = keccak256("atomic-failure");
-        vm.recordLogs();
-        vm.expectRevert(bytes("TREASURY_FAILURE"));
-        governance.execute(correlationId, 9, true);
-        assertEq(vm.getRecordedLogs().length, 0);
-        assertFalse(governance.consumed(correlationId));
-        assertEq(governance.lastEnteredClaim(correlationId), 0);
-        assertEq(claims.lastEnteredClaim(correlationId), 0);
-        assertEq(custody.lastEnteredClaim(correlationId), 0);
-        assertEq(settlement.lastEnteredClaim(correlationId), 0);
-        assertEq(rewards.lastEnteredClaim(correlationId), 0);
-        assertEq(treasury.lastEnteredClaim(correlationId), 0);
-        assertEq(treasury.reconciledClaim(correlationId), 0);
+        for (uint8 failAt = 1; failAt <= 6; ++failAt) {
+            bytes32 correlationId = keccak256(abi.encode("atomic-failure", failAt));
+            vm.recordLogs();
+            vm.expectRevert(abi.encodeWithSelector(CorrelatedFixtureModule.InjectedFailure.selector, failAt));
+            governance.execute(correlationId, 9, failAt);
+            assertEq(vm.getRecordedLogs().length, 0);
+            assertFalse(governance.consumed(correlationId));
+            assertEq(governance.lastEnteredClaim(correlationId), 0);
+            assertEq(claims.lastEnteredClaim(correlationId), 0);
+            assertEq(custody.lastEnteredClaim(correlationId), 0);
+            assertEq(settlement.lastEnteredClaim(correlationId), 0);
+            assertEq(rewards.lastEnteredClaim(correlationId), 0);
+            assertEq(treasury.lastEnteredClaim(correlationId), 0);
+            assertEq(treasury.reconciledClaim(correlationId), 0);
 
-        // The reverted attempt must not consume the replay marker or poison a retry.
-        governance.execute(correlationId, 9, false);
-        assertTrue(governance.consumed(correlationId));
-        assertEq(treasury.reconciledClaim(correlationId), 9);
+            // A reverted attempt must not consume the replay marker or poison a retry.
+            governance.execute(correlationId, 9, 0);
+            assertTrue(governance.consumed(correlationId));
+            assertEq(treasury.reconciledClaim(correlationId), 9);
+        }
     }
 
     function testFuzz_everySuccessfulPathHasTwelveCorrelatedLogs(bytes32 correlationId, uint256 claimId) public {
         vm.assume(correlationId != bytes32(0));
         vm.recordLogs();
-        governance.execute(correlationId, claimId, false);
+        governance.execute(correlationId, claimId, 0);
         Vm.Log[] memory logs = vm.getRecordedLogs();
         assertEq(logs.length, 12);
         for (uint256 i; i < logs.length; ++i) {
@@ -141,7 +143,7 @@ contract V2SC133EventOrderingTest is Test {
         for (uint256 i; i < count; ++i) {
             bytes32 correlationId = keccak256(abi.encode(address(this), seed, i));
             uint256 claimId = uint256(keccak256(abi.encode(seed, i, "claim")));
-            governance.execute(correlationId, claimId, false);
+            governance.execute(correlationId, claimId, 0);
             assertTrue(governance.consumed(correlationId));
             assertEq(treasury.reconciledClaim(correlationId), claimId);
         }

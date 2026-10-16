@@ -579,6 +579,31 @@ contract StakeVaultTest is Test {
         vault.carryForwardAppeal(address(token), verifier, CLAIM_A, 0, 0, STAKE);
     }
 
+    function test_carryForwardAppeal_priorRoundRevertsWithoutMovingLock() public {
+        vm.prank(verifier);
+        vault.depositStake(CLAIM_A, STAKE);
+
+        vm.prank(settlement);
+        vm.expectRevert(abi.encodeWithSelector(V2Errors.InvalidArgument.selector, "destination round must be later"));
+        vault.carryForwardAppeal(address(token), verifier, CLAIM_A, 1, 0, STAKE);
+
+        assertEq(vault.lockedPrincipal(address(token), verifier, CLAIM_A, 0, IV2Types.LockCategory.VERIFIER_PRINCIPAL), STAKE);
+        assertEq(vault.lockedPrincipal(address(token), verifier, CLAIM_A, 1, IV2Types.LockCategory.VERIFIER_PRINCIPAL), 0);
+        assertEq(vault.totalCustody(address(token)), STAKE);
+    }
+
+    function test_carryForwardAppeal_canMoveToLaterRound() public {
+        vm.prank(verifier);
+        vault.depositStake(CLAIM_A, STAKE);
+
+        vm.prank(settlement);
+        vault.carryForwardAppeal(address(token), verifier, CLAIM_A, 0, 2, STAKE);
+
+        assertEq(vault.lockedPrincipal(address(token), verifier, CLAIM_A, 0, IV2Types.LockCategory.VERIFIER_PRINCIPAL), 0);
+        assertEq(vault.lockedPrincipal(address(token), verifier, CLAIM_A, 2, IV2Types.LockCategory.VERIFIER_PRINCIPAL), STAKE);
+        assertEq(vault.totalCustody(address(token)), STAKE);
+    }
+
     function test_rolloverRound_movesLockToNextRound() public {
         vm.prank(verifier);
         vault.depositStake(CLAIM_A, STAKE);
