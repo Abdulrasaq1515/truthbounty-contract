@@ -298,6 +298,22 @@ contract StakeVaultTest is Test {
         vault.depositStake(CLAIM_A, 0);
     }
 
+    function test_depositStake_enforcesMinimumBoundary() public {
+        uint256 minimum = vault.minStakeAmount();
+
+        vm.prank(verifier);
+        vm.expectRevert(abi.encodeWithSelector(V2Errors.DustStake.selector, minimum - 1, minimum));
+        vault.depositStake(CLAIM_A, minimum - 1);
+
+        vm.prank(verifier);
+        vault.depositStake(CLAIM_A, minimum);
+        assertEq(vault.staked(CLAIM_A, verifier), minimum);
+
+        vm.prank(verifier2);
+        vault.depositStake(CLAIM_B, minimum + 1);
+        assertEq(vault.staked(CLAIM_B, verifier2), minimum + 1);
+    }
+
     function test_unsupportedAssetReverts() public {
         MockERC20 unsupported = new MockERC20("X", "X");
         unsupported.mint(verifier, STAKE);
