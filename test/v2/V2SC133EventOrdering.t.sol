@@ -109,7 +109,18 @@ contract V2SC133EventOrderingTest is Test {
         governance.execute(correlationId, 9, true);
         assertEq(vm.getRecordedLogs().length, 0);
         assertFalse(governance.consumed(correlationId));
+        assertEq(governance.lastEnteredClaim(correlationId), 0);
+        assertEq(claims.lastEnteredClaim(correlationId), 0);
+        assertEq(custody.lastEnteredClaim(correlationId), 0);
+        assertEq(settlement.lastEnteredClaim(correlationId), 0);
+        assertEq(rewards.lastEnteredClaim(correlationId), 0);
+        assertEq(treasury.lastEnteredClaim(correlationId), 0);
         assertEq(treasury.reconciledClaim(correlationId), 0);
+
+        // The reverted attempt must not consume the replay marker or poison a retry.
+        governance.execute(correlationId, 9, false);
+        assertTrue(governance.consumed(correlationId));
+        assertEq(treasury.reconciledClaim(correlationId), 9);
     }
 
     function testFuzz_everySuccessfulPathHasTwelveCorrelatedLogs(bytes32 correlationId, uint256 claimId) public {
