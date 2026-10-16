@@ -10,6 +10,7 @@ fs_permissions = [{ access = "read", path = "./" }]
 # Must match hardhat.config.ts, scripts/canonicalV2Manifest.ts, and
 # deployments/releases/v2-sc-129-release-manifest.json.
 solc = "0.8.28"
+evm_version = "prague"
 
 # See more config options https://github.com/foundry-rs/foundry/tree/master/config
 

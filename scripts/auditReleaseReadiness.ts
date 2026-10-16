@@ -80,6 +80,21 @@ export async function auditReleaseReadiness(): Promise<AuditResult> {
     } else {
         console.log("✅ Source, bytecode, and metadata reproducibility verified (V2-SC-129).");
     }
+
+    // 5. PREWAVE-SC-062: per-contract and proxy deployment size budgets must be
+    //    satisfied before any broadcast.  Oversized contracts fail the gate and
+    //    prevent deployment.  Growth is attributed per contract.
+    const sizeCheck = spawnSync(
+        process.execPath,
+        [path.join(__dirname, "check-deployment-sizes.mjs")],
+        { cwd: path.join(__dirname, ".."), encoding: "utf-8" }
+    );
+    if (sizeCheck.status !== 0) {
+        const detail = `${sizeCheck.stdout ?? ""}${sizeCheck.stderr ?? ""}`.trim();
+        issues.push(`Deployment size budget check failed (PREWAVE-SC-062): ${detail || sizeCheck.error?.message || "unknown error"}`);
+    } else {
+        console.log("✅ Deployment size budgets satisfied — no contract exceeds hard limit (PREWAVE-SC-062).");
+    }
     console.log("✅ Classification of deployment artifacts:");
     for (const [contract, status] of Object.entries(classification)) {
         console.log(`   - ${contract}: ${status}`);

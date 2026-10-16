@@ -796,6 +796,34 @@ contract PauseExitLivenessTest is PauseLivenessBase {
         assertEq(vault.pauseMatrixVersion(), matrix.version());
     }
 
+    /// @dev A view is a snapshot for display, never an execution permit. Status and recovery
+    ///      balances remain readable through overlapping pauses, while the corresponding outcome
+    ///      mutation rechecks its gate when submitted.
+    function test_pauseViewsRemainReadable_butStaleStatusCannotAuthorizeSettlement() public {
+        IV2Types.Claim memory beforePause = claims.getClaim(aliceOpenClaim);
+        assertEq(uint8(beforePause.status), uint8(IV2Types.ClaimStatus.OPEN));
+
+        _pauseScope(SCOPE_CLAIMS);
+        _pauseScope(SCOPE_SETTLEMENT);
+        _escalate(controller.LEVEL_FINANCIAL());
+
+        IV2Types.Claim memory duringPause = claims.getClaim(aliceOpenClaim);
+        assertEq(uint8(duringPause.status), uint8(IV2Types.ClaimStatus.OPEN));
+        assertEq(uint8(claims.stateOf(aliceOpenClaim)), uint8(IV2Types.ClaimState.VerificationOpen));
+        assertEq(vault.claimableBalance(address(token), alice), ALICE_CLAIMABLE);
+        assertEq(allocator.claimable(address(token), alice), ALICE_REWARD);
+        assertEq(ledger.availableBalance(alice), ALICE_CREDIT);
+
+        // The prior OPEN status is useful for display but cannot authorize settlement now.
+        vm.expectRevert(V2Errors.ProtocolPaused.selector);
+        claims.finalizeClaim(aliceOpenClaim, IV2Types.ClaimStatus.REJECTED);
+
+        // Recovery exits remain usable during pause nesting and the reads reflect their effects.
+        vm.prank(alice);
+        vault.withdraw(address(token), ALICE_CLAIMABLE);
+        assertEq(vault.claimableBalance(address(token), alice), 0);
+    }
+
     function test_matrixVersionIsConsistentAcrossModules() public view {
         uint16 v = matrix.version();
         assertEq(v, 1);

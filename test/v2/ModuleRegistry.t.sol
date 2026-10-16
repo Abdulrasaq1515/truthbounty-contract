@@ -23,6 +23,7 @@ import "../../contracts/v2/interfaces/ITreasury.sol";
 import "../../contracts/v2/interfaces/IReputationRoots.sol";
 import "../../contracts/v2/interfaces/IGovernanceHooks.sol";
 import "../../contracts/v2/interfaces/IEmergencyControls.sol";
+import "../../contracts/v2/interfaces/V2ConformanceFixture.sol";
 import "../../contracts/mocks/MockV2Module.sol";
 
 contract ModuleRegistryTest is Test {
@@ -134,6 +135,21 @@ contract ModuleRegistryTest is Test {
         assertEq(registry.moduleCount(), 2);
         assertEq(uint256(registry.moduleStatus(claims)), uint256(IModuleRegistry.ModuleStatus.REGISTERED));
         assertEq(uint256(registry.moduleStatus(evidence)), uint256(IModuleRegistry.ModuleStatus.REGISTERED));
+    }
+
+    function test_registerModules_rejectsBatchAbovePublishedLimit() public {
+        IModuleRegistry.ModuleRegistration[] memory regs = new IModuleRegistry.ModuleRegistration[](
+            registry.MAX_REGISTRY_BATCH_SIZE() + 1
+        );
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                V2Errors.RegistryBatchTooLarge.selector,
+                regs.length,
+                registry.MAX_REGISTRY_BATCH_SIZE()
+            )
+        );
+        registry.registerModules(regs);
     }
 
     function test_registerModules_atomicBatch_revertsEverything() public {
@@ -552,6 +568,47 @@ contract ModuleRegistryTest is Test {
         assertTrue(newVersion != oldVersion);
         assertEq(registry.replacementReadyAt(claims), 0);
         assertTrue(registry.isRegistered(claims));
+        assertTrue(v2.supportsInterface(type(IV2Module).interfaceId));
+        assertTrue(v2.supportsInterface(type(IClaims).interfaceId));
+        assertFalse(v2.supportsInterface(type(IEvidence).interfaceId));
+    }
+
+    function test_replace_rejectsImplementationThatDropsCanonicalInterface() public {
+        bytes32 claims = ModuleRegistryLib.MODULE_CLAIMS;
+        _registerAndActivate(claims, _fresh(claims, 2, 0));
+
+        MockV2Module incompatible = new MockV2Module(2, 1, type(IEvidence).interfaceId);
+        IModuleRegistry.ModuleRegistration memory replacement = _regVers(claims, incompatible, 2, 1);
+
+        vm.prank(governance);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                V2Errors.ModuleInterfaceMismatch.selector,
+                type(IClaims).interfaceId,
+                bytes4(0)
+            )
+        );
+        registry.proposeModuleReplacement(replacement);
+    }
+
+    function test_fixtureReportsOnlyItsDeclaredInterfaces() public {
+        V2ConformanceFixture fixture = new V2ConformanceFixture();
+
+        assertTrue(fixture.supportsInterface(0x01ffc9a7));
+        assertTrue(fixture.supportsInterface(type(IV2Module).interfaceId));
+        assertTrue(fixture.supportsInterface(type(IClaims).interfaceId));
+        assertTrue(fixture.supportsInterface(type(IAggregation).interfaceId));
+        assertFalse(fixture.supportsInterface(type(IEvidence).interfaceId));
+        assertFalse(fixture.supportsInterface(0xffffffff));
+    }
+
+    function test_registryReportsItsExpectedDiscoveryInterfaces() public view {
+        assertTrue(registry.supportsInterface(type(IModuleRegistry).interfaceId));
+        assertTrue(registry.supportsInterface(type(IV2Module).interfaceId));
+        assertTrue(registry.supportsInterface(type(IAccessControl).interfaceId));
+        assertTrue(registry.supportsInterface(0x01ffc9a7));
+        assertFalse(registry.supportsInterface(type(IClaims).interfaceId));
+        assertFalse(registry.supportsInterface(0xffffffff));
     }
 
     function test_replace_noopRejected() public {

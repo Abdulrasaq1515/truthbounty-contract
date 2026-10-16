@@ -67,6 +67,15 @@ contract TruthBountyGovernor is
 {
     using GovernanceForbiddenCalls for bytes;
 
+    /// @notice Maximum number of calls in one governance proposal.
+    uint256 public constant MAX_PROPOSAL_OPERATIONS = 20;
+    /// @notice Maximum encoded calldata for one governed action.
+    uint256 public constant MAX_OPERATION_CALLDATA_BYTES = 8_192;
+    /// @notice Maximum combined encoded calldata across one proposal.
+    uint256 public constant MAX_PROPOSAL_CALLDATA_BYTES = 65_536;
+    /// @notice Maximum UTF-8 description size for a governance proposal.
+    uint256 public constant MAX_PROPOSAL_DESCRIPTION_BYTES = 4_096;
+
     /// @notice Explicit, exhaustive conditions under which a governance proposal may be cancelled (V2-SC-066).
     enum CancelAuthority {
         /// @dev No cancellation condition satisfied — every cancel attempt fails closed.
@@ -127,6 +136,14 @@ contract TruthBountyGovernor is
     /// @notice Proposal target is not in the governed module allowlist.
     /// @param target Rejected target address.
     error TargetNotGovernedModule(address target);
+    /// @notice Proposal action arrays are empty, over limit, or have mismatched lengths.
+    error InvalidProposalOperationCount(uint256 targets, uint256 values, uint256 calldatas, uint256 maximum);
+    /// @notice One action's calldata exceeds its published limit.
+    error OperationCalldataTooLarge(uint256 index, uint256 provided, uint256 maximum);
+    /// @notice Aggregate action calldata exceeds its published limit.
+    error ProposalCalldataTooLarge(uint256 provided, uint256 maximum);
+    /// @notice Proposal description exceeds its published limit.
+    error ProposalDescriptionTooLarge(uint256 provided, uint256 maximum);
     /// @notice Guardian module can only be initialized once.
     /// @param existingModule Already configured module.
     error GovernanceGuardianModuleAlreadySet(address existingModule);
@@ -260,6 +277,8 @@ contract TruthBountyGovernor is
         bytes32 descriptionHash
     ) public payable override returns (uint256) {
         _rejectNativeValue();
+        _validateProposalOperations(targets, values, calldatas);
+        _validateProposalValues(values);
         return super.execute(targets, values, calldatas, descriptionHash);
     }
 
@@ -270,8 +289,9 @@ contract TruthBountyGovernor is
         bytes[] memory calldatas,
         string memory description
     ) public override returns (uint256) {
-        _validateProposalOperations(targets, calldatas);
+        _validateProposalOperations(targets, values, calldatas);
         _validateProposalValues(values);
+        _validateProposalDescription(description);
         return super.propose(targets, values, calldatas, description);
     }
 
@@ -283,8 +303,9 @@ contract TruthBountyGovernor is
         string memory description,
         address proposer
     ) internal override(Governor, GovernorStorage) returns (uint256) {
-        _validateProposalOperations(targets, calldatas);
+        _validateProposalOperations(targets, values, calldatas);
         _validateProposalValues(values);
+        _validateProposalDescription(description);
         uint256 proposalId = super._propose(targets, values, calldatas, description, proposer);
 
         // Register the canonical snapshot timestamp for this proposal.
@@ -319,6 +340,8 @@ contract TruthBountyGovernor is
         bytes[] memory calldatas,
         bytes32 descriptionHash
     ) public override returns (uint256) {
+        _validateProposalOperations(targets, values, calldatas);
+        _validateProposalValues(values);
         uint256 proposalId = getProposalId(targets, values, calldatas, descriptionHash);
         address caller = _msgSender();
 
@@ -503,9 +526,28 @@ contract TruthBountyGovernor is
         return super._executor();
     }
 
-    function _validateProposalOperations(address[] memory targets, bytes[] memory calldatas) internal view {
+    function _validateProposalOperations(
+        address[] memory targets,
+        uint256[] memory values,
+        bytes[] memory calldatas
+    ) internal view {
         uint256 length = targets.length;
+        if (
+            length == 0 || length != values.length || length != calldatas.length
+                || length > MAX_PROPOSAL_OPERATIONS
+        ) {
+            revert InvalidProposalOperationCount(length, values.length, calldatas.length, MAX_PROPOSAL_OPERATIONS);
+        }
+        uint256 totalCalldataBytes;
         for (uint256 i = 0; i < length; ++i) {
+            uint256 calldataLength = calldatas[i].length;
+            if (calldataLength > MAX_OPERATION_CALLDATA_BYTES) {
+                revert OperationCalldataTooLarge(i, calldataLength, MAX_OPERATION_CALLDATA_BYTES);
+            }
+            totalCalldataBytes += calldataLength;
+            if (totalCalldataBytes > MAX_PROPOSAL_CALLDATA_BYTES) {
+                revert ProposalCalldataTooLarge(totalCalldataBytes, MAX_PROPOSAL_CALLDATA_BYTES);
+            }
             if (!moduleRegistry.isGovernedModule(targets[i])) {
                 revert TargetNotGovernedModule(targets[i]);
             }
@@ -523,6 +565,13 @@ contract TruthBountyGovernor is
         uint256 length = values.length;
         for (uint256 i = 0; i < length; ++i) {
             if (values[i] != 0) revert NativeValueProposalNotAllowed(i, values[i]);
+        }
+    }
+
+    function _validateProposalDescription(string memory description) internal pure {
+        uint256 descriptionLength = bytes(description).length;
+        if (descriptionLength > MAX_PROPOSAL_DESCRIPTION_BYTES) {
+            revert ProposalDescriptionTooLarge(descriptionLength, MAX_PROPOSAL_DESCRIPTION_BYTES);
         }
     }
 }
