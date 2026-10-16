@@ -20,6 +20,19 @@ library V2Guarantees {
     /// @notice Maximum confirmation depth (30 days of Optimism 2s blocks).
     uint64 internal constant MAX_CONFIRMATION_DEPTH = 1_296_000;
 
+    /// @notice Maximum appeal-rollover rounds a single appeal chain may span.
+    /// @dev Bounds rollover inputs so principal/custody preservation can be
+    ///      proven inductively across a finite, deterministic round count.
+    uint64 internal constant MAX_APPEAL_ROUNDS = 64;
+
+    /// @notice Minimum stake (dust floor) any appeal round may carry.
+    /// @dev Rounds below this floor are invalid and must fail canonically.
+    uint256 internal constant MIN_APPEAL_STAKE = 1;
+
+    /// @notice Maximum stake any single appeal round may carry.
+    /// @dev Prevents overflow of cumulative principal across rollover rounds.
+    uint256 internal constant MAX_APPEAL_STAKE = type(uint128).max;
+
     /// @notice Default confirmation depth used by canonical V2 deployments.
     /// @dev Covers L2 sequencer batch windows; ~1 hour of 2-second blocks.
     uint64 internal constant DEFAULT_CONFIRMATION_DEPTH = 1_800;
@@ -47,6 +60,12 @@ library V2Guarantees {
     error ZeroedGuarantees();
     /// @notice A deployment manifest field disagrees with the on-chain record.
     error ManifestMismatch(string field);
+    /// @notice A deadline was evaluated with the wrong inclusive/exclusive rule.
+    error DeadlineBoundaryViolation(string reason);
+    /// @notice An appeal round is invalid (out of range, dust, or over max).
+    error InvalidAppealRound(uint64 round);
+    /// @notice An appeal rollover would lose, duplicate, or strand principal.
+    error AppealRolloverViolation(string reason);
     /// @notice The consumer applied a removal that contradicts canonical log
     ///         identity (defense against corrupt or forged rollback inputs).
     error InvalidRemoval(bytes32 eventKey);
@@ -95,6 +114,70 @@ library V2Guarantees {
         if (!guarantees.eventsAreTerminalOnEmission) {
             revert InvalidGuarantees("canonical V2 events must be terminal on emission");
         }
+    }
+
+    // =========================================================================
+    // Deadline semantics (inclusive/exclusive)
+    // =========================================================================
+
+    /// @notice True when `now` is strictly before the exclusive deadline.
+    /// @dev Deadlines are exclusive: the action is valid only while
+    ///      `now < deadline`. At `now == deadline` the action is expired.
+    function isBeforeDeadline(uint64 now, uint64 deadline) internal pure returns (bool) {
+        return now < deadline;
+    }
+
+    /// @notice True when `now` is at or after the exclusive deadline.
+    /// @dev Complement of `isBeforeDeadline`; exact-deadline is expired.
+    function isAtOrAfterDeadline(uint64 now, uint64 deadline) internal pure returns (bool) {
+        return now >= deadline;
+    }
+
+    /// @notice Reverts unless `now` is strictly before the exclusive deadline.
+    /// @dev Canonical error for expired actions; one-second-before passes,
+    ///      exact-deadline and one-second-after fail.
+    function requireBeforeDeadline(uint64 now, uint64 deadline) internal pure {
+        if (!isBeforeDeadline(now, deadline)) {
+            revert DeadlineBoundaryViolation("action expired at exclusive deadline");
+        }
+    }
+
+    // =========================================================================
+    // Appeal rollover (principal and custody preservation)
+    // =========================================================================
+
+    /// @notice Validates one appeal round's stake against canonical bounds.
+    /// @dev Reverts with `InvalidAppealRound` for out-of-range rounds, dust
+    ///      stakes below `MIN_APPEAL_STAKE`, and stakes above `MAX_APPEAL_STAKE`.
+    function validateAppealRound(uint64 round, uint256 stake) internal pure {
+        if (round >= MAX_APPEAL_ROUNDS) {
+            revert InvalidAppealRound(round);
+        }
+        if (stake < MIN_APPEAL_STAKE) {
+            revert InvalidAppealRound(round);
+        }
+        if (stake > MAX_APPEAL_STAKE) {
+            revert InvalidAppealRound(round);
+        }
+    }
+
+    /// @notice Rolls one appeal round's principal and custody forward.
+    /// @dev Pure conservation: the returned principal equals the incoming
+    ///      principal plus the round stake, and custody is preserved exactly.
+    ///      Reverts if the round is invalid or if the addition would overflow,
+    ///      so principal can never be lost, duplicated, or stranded.
+    function rolloverAppeal(
+        uint64 round,
+        uint256 principal,
+        uint256 stake,
+        bytes32 custody
+    ) internal pure returns (uint256 newPrincipal, bytes32 newCustody) {
+        validateAppealRound(round, stake);
+        if (principal > type(uint256).max - stake) {
+            revert AppealRolloverViolation("principal overflow on rollover");
+        }
+        newPrincipal = principal + stake;
+        newCustody = custody;
     }
 
     /// @notice Returns the deployment-default guarantees for Optimism/EVM L2.

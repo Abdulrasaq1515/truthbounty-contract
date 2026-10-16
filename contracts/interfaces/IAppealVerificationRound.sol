@@ -223,6 +223,14 @@ interface IAppealVerificationRound is IVerificationSource {
     /// @notice Thrown when the voter cap for a round is reached.
     error VoterLimitExceeded(uint256 claimId, uint256 maxVoters);
 
+    /// @notice Thrown when an action is attempted at or after the round deadline.
+    /// @dev Deadline semantics are EXCLUSIVE: an action is valid only while
+    ///      `block.timestamp < deadline`. The exact-deadline timestamp is expired.
+    error AppealDeadlineExpired(uint256 claimId, uint256 timestamp, uint256 deadline);
+
+    /// @notice Thrown when a rollover input (round index or stake) is out of bounds.
+    error InvalidRolloverInput(uint256 claimId, uint256 roundIndex, uint256 stakeAmount);
+
     /// @notice Thrown when no bond vault or bond amount is configured (fail closed).
     error BondNotConfigured();
 
@@ -328,4 +336,20 @@ interface IAppealVerificationRound is IVerificationSource {
     function getAppealVote(uint256 claimId, address verifier) external view returns (AppealVote memory);
 
     function isAppealOpen(uint256 claimId) external view returns (bool);
+
+    /**
+     * @notice Returns whether the appeal round for `claimId` is still open for
+     *         voting at `timestamp`.
+     * @dev Deadline semantics are EXCLUSIVE: returns true iff the round status is
+     *      OPEN and `timestamp < deadline`. At exactly `deadline` this returns
+     *      false, so one-second-before is open and exact-deadline is closed.
+     */
+    function isAppealOpenAt(uint256 claimId, uint256 timestamp) external view returns (bool);
+
+    /**
+     * @notice Returns the exclusive deadline for the current appeal round of `claimId`.
+     * @dev Actions are valid strictly before the returned timestamp; the timestamp
+     *      itself is expired. Reverts if no round has been opened.
+     */
+    function appealDeadline(uint256 claimId) external view returns (uint256);
 }

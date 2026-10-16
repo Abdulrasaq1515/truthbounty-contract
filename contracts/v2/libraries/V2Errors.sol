@@ -175,6 +175,12 @@ library V2Errors {
     /// @notice Round transfer / rollover / carry-forward rejected because from == to.
     error InvalidRoundTransfer(uint256 fromRound, uint256 toRound);
 
+    /// @notice Deadline has not yet been reached; the action is still within its inclusive window.
+    /// @dev Inclusive semantics: an action is valid while `block.timestamp <= deadline`.
+    ///      Raised when `block.timestamp < deadline` for an action that requires the deadline to have elapsed.
+    /// @param deadline The inclusive deadline timestamp that has not yet been reached.
+    error DeadlineNotReached(uint64 deadline, uint64 timestamp);
+
     // =========================================================================
     // Disputes
     // =========================================================================
@@ -186,11 +192,22 @@ library V2Errors {
     /// @notice Dispute window closed.
     error DisputeWindowClosed();
 
+    /// @notice Deadline has elapsed; the action is past its inclusive window.
+    /// @dev Inclusive semantics: an action is valid while `block.timestamp <= deadline`.
+    ///      Raised when `block.timestamp > deadline`.
+    /// @param deadline The inclusive deadline timestamp that has elapsed.
+    error DeadlineExpired(uint64 deadline, uint64 timestamp);
+
     /// @notice Dispute already opened.
     error DisputeAlreadyExists();
 
     /// @notice Invalid dispute reason.
     error InvalidDisputeReason();
+
+    /// @notice Appeal round is invalid for rollover (zero, non-monotonic, or beyond the bounded window).
+    /// @param fromRound Round the rollover originates from.
+    /// @param toRound Round the rollover targets.
+    error InvalidAppealRound(uint256 fromRound, uint256 toRound);
 
     // =========================================================================
     // Stake & Custody
@@ -235,6 +252,20 @@ library V2Errors {
     /// @param custody Accounted custody.
     /// @param obligations Sum of recorded obligations.
     error ObligationsExceedCustody(address asset, uint256 custody, uint256 obligations);
+
+    /// @notice Appeal rollover would strand, duplicate, or lose principal across rounds.
+    /// @param asset Asset whose principal conservation failed.
+    /// @param round Round at which the invariant was checked.
+    /// @param expected Principal expected to be preserved.
+    /// @param actual Principal observed after rollover.
+    error AppealPrincipalNotPreserved(address asset, uint256 round, uint256 expected, uint256 actual);
+
+    /// @notice Appeal rollover would strand, duplicate, or lose custody across rounds.
+    /// @param asset Asset whose custody conservation failed.
+    /// @param round Round at which the invariant was checked.
+    /// @param expected Custody expected to be preserved.
+    /// @param actual Custody observed after rollover.
+    error AppealCustodyNotPreserved(address asset, uint256 round, uint256 expected, uint256 actual);
 
     // =========================================================================
     // Aggregation & Reputation
