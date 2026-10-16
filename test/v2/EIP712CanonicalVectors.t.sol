@@ -412,7 +412,8 @@ contract EIP712CanonicalVectorsTest is Test {
         assertTrue(verifier.isSignatureUsed(digest));
 
         // Same signature again: rejected as a replay.
-        vm.expectRevert(EIP712Verifier.SignatureAlreadyUsed.selector);
+        // The live nonce has advanced, so recovery fails for the rebuilt digest.
+        vm.expectRevert(EIP712Verifier.InvalidSignature.selector);
         verifier.verifyClaimSubmission(
             claimant,
             V.BOUNTY_ID_A,
@@ -547,7 +548,8 @@ contract EIP712CanonicalVectorsTest is Test {
         assertEq(verifier.getNonce(verifier_), V.INTENT_NONCE_A + 1);
         assertTrue(verifier.isSignatureUsed(digest));
 
-        vm.expectRevert(EIP712Verifier.SignatureAlreadyUsed.selector);
+        // The live nonce has advanced, so recovery fails for the rebuilt digest.
+        vm.expectRevert(EIP712Verifier.InvalidSignature.selector);
         verifier.verifyVerificationIntent(
             verifier_,
             V.BOUNTY_ID_A,
@@ -596,6 +598,56 @@ contract EIP712CanonicalVectorsTest is Test {
         );
 
         assertEq(verifier.getNonce(verifier_), V.INTENT_NONCE_A + 1);
+    }
+
+    /// @dev Each mutation signs different bytes while submission remains canonical.
+    ///      Exact selectors and unchanged replay state rule out unrelated rejection reasons.
+    function test_VerificationIntentMutationMatrix() public {
+        address signer = vm.addr(TEST_KEY);
+        bytes32 canonicalStruct = _intentStructHash(signer, V.BOUNTY_ID_A, true, V.INTENT_A_REASON, 0, V.CANONICAL_DEADLINE);
+        bytes32 domain = verifier.getDomainSeparator();
+        bytes32[8] memory digests;
+        digests[0] = keccak256(abi.encodePacked(hex"1901", keccak256(abi.encode(
+            V.DOMAIN_TYPE_HASH, V.NAME_HASH, V.VERSION_HASH, V.CHAIN_ID_WRONG, address(verifier)
+        )), canonicalStruct));
+        digests[1] = keccak256(abi.encodePacked(hex"1901", keccak256(abi.encode(
+            V.DOMAIN_TYPE_HASH, V.NAME_HASH, V.VERSION_HASH, block.chainid, V.WRONG_VERIFYING_CONTRACT
+        )), canonicalStruct));
+        digests[2] = keccak256(abi.encodePacked(hex"1901", keccak256(abi.encode(
+            V.DOMAIN_TYPE_HASH, keccak256("TruthBountyV2"), V.VERSION_HASH, block.chainid, address(verifier)
+        )), canonicalStruct));
+        bytes32 reordered = keccak256(abi.encode(
+            keccak256("VerificationIntent(uint256 bountyId,address verifier,bool approve,string reason,uint256 nonce,uint256 deadline)"),
+            V.BOUNTY_ID_A, signer, true, keccak256(bytes(V.INTENT_A_REASON)), uint256(0), V.CANONICAL_DEADLINE
+        ));
+        digests[3] = keccak256(abi.encodePacked(hex"1901", domain, reordered));
+        digests[4] = verifier.getVerificationIntentHash(signer, V.BOUNTY_ID_A, true, V.INTENT_A_REASON, 1, V.CANONICAL_DEADLINE);
+        digests[5] = verifier.getVerificationIntentHash(signer, V.BOUNTY_ID_A, true, V.INTENT_A_REASON, 0, V.CANONICAL_DEADLINE + 1);
+        digests[6] = verifier.getVerificationIntentHash(signer, V.BOUNTY_ID_A, false, V.INTENT_A_REASON, 0, V.CANONICAL_DEADLINE);
+        digests[7] = verifier.getVerificationIntentHash(signer, V.BOUNTY_ID_A, true, string.concat(V.INTENT_A_REASON, " "), 0, V.CANONICAL_DEADLINE);
+        bytes32 canonicalDigest = verifier.getVerificationIntentHash(signer, V.BOUNTY_ID_A, true, V.INTENT_A_REASON, 0, V.CANONICAL_DEADLINE);
+        for (uint256 i; i < digests.length; ++i) {
+            assertTrue(digests[i] != canonicalDigest, "mutation must change digest");
+            bytes memory signature = _sign(TEST_KEY, digests[i]);
+            vm.expectRevert(EIP712Verifier.InvalidSignature.selector);
+            verifier.verifyVerificationIntent(signer, V.BOUNTY_ID_A, true, V.INTENT_A_REASON, V.CANONICAL_DEADLINE, signature);
+            assertEq(verifier.getNonce(signer), 0, "rejected intent must not consume nonce");
+            assertFalse(verifier.isSignatureUsed(canonicalDigest));
+        }
+        assertTrue(verifier.verifyVerificationIntent(signer, V.BOUNTY_ID_A, true, V.INTENT_A_REASON,
+            V.CANONICAL_DEADLINE, _sign(TEST_KEY, canonicalDigest)));
+    }
+
+    function test_VerificationIntentDeadlineIsInclusive() public {
+        address signer = vm.addr(TEST_KEY);
+        bytes32 digest = verifier.getVerificationIntentHash(signer, V.BOUNTY_ID_A, true, V.INTENT_A_REASON, 0, V.CANONICAL_DEADLINE);
+        bytes memory signature = _sign(TEST_KEY, digest);
+        vm.warp(V.CANONICAL_DEADLINE + 1);
+        vm.expectRevert(EIP712Verifier.SignatureExpired.selector);
+        verifier.verifyVerificationIntent(signer, V.BOUNTY_ID_A, true, V.INTENT_A_REASON, V.CANONICAL_DEADLINE, signature);
+        assertEq(verifier.getNonce(signer), 0);
+        vm.warp(V.CANONICAL_DEADLINE);
+        assertTrue(verifier.verifyVerificationIntent(signer, V.BOUNTY_ID_A, true, V.INTENT_A_REASON, V.CANONICAL_DEADLINE, signature));
     }
 
     function test_NoncesAreMonotonicAndIndependentPerAccount() public {

@@ -100,7 +100,7 @@ The canonical deadline used by the vectors is `4102444800` (2100-01-01T00:00:00Z
 | Task | Command |
 | --- | --- |
 | Check vectors, mirror, and implementations (CI) | `node scripts/check-eip712-vectors.mjs` |
-| Deterministically regenerate the JSON | `node scripts/check-eip712-vectors.mjs --emit` |
+| Deterministically regenerate JSON and Solidity mirror | `node scripts/check-eip712-vectors.mjs --emit` |
 | Drift-failure self-tests | `node --test test/scripts/check-eip712-vectors.test.mjs` |
 | On-chain positive/negative vectors and signatures | `forge test --match-path 'test/v2/EIP712CanonicalVectors.t.sol' -vvv` |
 | Solidity ↔ ethers parity and on-chain signatures | `npx hardhat test test/EIP712CanonicalVectors.test.ts` |
@@ -111,8 +111,41 @@ implementation whose type string drifted fails the pull request with the expecte
 ## Changing a signed operation
 
 1. Update the type string in every implementation listed above.
-2. Run `node scripts/check-eip712-vectors.mjs --emit` and commit the regenerated JSON.
-3. Update `contracts/test/EIP712CanonicalVectors.sol` from the JSON (the drift check prints the exact expected/found value for each stale constant).
+2. Review the canonical inputs in `scripts/check-eip712-vectors.mjs`; `VERIFICATION_INTENT_TYPE_STRING` defines the JavaScript field list and its hash. Both Solidity declarations must agree before emission is allowed.
+3. Run `node scripts/check-eip712-vectors.mjs --emit` and commit both generated artifacts. This also regenerates numeric constants such as nonce and deadline; never repair them by hand.
 4. Run `node scripts/check-eip712-vectors.mjs`, `node --test test/scripts/check-eip712-vectors.test.mjs`, the Foundry vector test, and the Hardhat parity test.
 
 A missing vector, a stale mirror constant, or an implementation whose type string no longer matches the JSON fails CI with the expected/found diff for that exact constant, so drift cannot land silently.
+
+## Verification-intent restoration (#689)
+
+`VERIFICATION_INTENT_TYPE_STRING` is the canonical tooling definition. The production
+contracts retain their existing `VERIFICATION_INTENT_TYPEHASH` getters and signing
+format; the checker validates the actual `keccak256` declarations in both files,
+ignoring comments. No production ABI, storage, domain or authorization behavior changes.
+The JSON, generated Solidity mirror, and documentation row must match that definition.
+
+In addition to approve/reason mutations, the vector registry now includes intent-specific
+chain ID, verifying contract, domain name, field order, nonce, deadline and expired-deadline
+cases. `test_VerificationIntentMutationMatrix` requires `InvalidSignature` for each
+signed-payload mutation and verifies that rejected attempts do not consume the nonce.
+The separate deadline test requires `SignatureExpired` after the bound and accepts the
+same signature exactly at the bound. Replay with an already-consumed nonce fails with
+`InvalidSignature`: the contract rebuilds the digest with the current nonce before recovery.
+
+The Node self-tests regenerate in two independent fresh temporary trees, compare both
+outputs byte-for-byte (normalizing only checkout CRLF to LF), and run the full drift check.
+For an additional clean Git-tree check after committing reviewed inputs:
+
+```sh
+node scripts/check-eip712-vectors.mjs --emit
+git diff --exit-code -- test/vectors/eip712-verifier.vectors.json contracts/test/EIP712CanonicalVectors.sol
+node scripts/check-eip712-vectors.mjs --emit
+git diff --exit-code -- test/vectors/eip712-verifier.vectors.json contracts/test/EIP712CanonicalVectors.sol
+node --test test/scripts/check-eip712-vectors.test.mjs
+```
+
+Restoration toolchain: Node 24.21.0, npm 11.19.0, ethers 6.17.0, Hardhat 3.16.0,
+Foundry 1.8.3 (`cae51ad458f6abb64852b7709eb784352429825d`), Solidity 0.8.28,
+optimizer 200 runs, via IR, Cancun EVM. Use `npm ci` and the pinned submodule revisions;
+do not regenerate with the separately installed `solc` npm package (0.8.37).

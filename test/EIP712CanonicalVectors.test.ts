@@ -1,9 +1,12 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { network } from "hardhat";
+import { fileURLToPath } from "node:url";
+import { TYPES, typesFor } from "../scripts/check-eip712-vectors.mjs";
+const { ethers, networkHelpers } = await network.connect("hardhatMainnet");
+const { time } = networkHelpers;
 import * as fs from "fs";
 import * as path from "path";
-import { time } from "@nomicfoundation/hardhat-network-helpers";
-import { EIP712Verifier } from "../typechain-types";
+import type { EIP712Verifier } from "../typechain-types";
 
 /**
  * V2-SC-152 — canonical EIP-712 schemas and cross-tool test vectors.
@@ -15,7 +18,7 @@ import { EIP712Verifier } from "../typechain-types";
  *   - every published negative vector is rejected on-chain.
  */
 
-const ROOT = path.resolve(__dirname, "..");
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const VECTORS = JSON.parse(
   fs.readFileSync(path.join(ROOT, "test/vectors/eip712-verifier.vectors.json"), "utf8")
 );
@@ -23,23 +26,6 @@ const VECTORS = JSON.parse(
 /** Canonical verifying contract address the vectors were computed against. */
 const CANONICAL_VERIFYING_CONTRACT: string = VECTORS.positives[0].verifyingContract;
 
-const TYPES = {
-  ClaimSubmission: [
-    { name: "claimant", type: "address" },
-    { name: "bountyId", type: "uint256" },
-    { name: "contentHash", type: "bytes32" },
-    { name: "nonce", type: "uint256" },
-    { name: "deadline", type: "uint256" },
-  ],
-  VerificationIntent: [
-    { name: "verifier", type: "address" },
-    { name: "bountyId", type: "uint256" },
-    { name: "approve", type: "bool" },
-    { name: "reason", type: "string" },
-    { name: "nonce", type: "uint256" },
-    { name: "deadline", type: "uint256" },
-  ],
-};
 
 function domainFor(chainId: number | bigint, verifyingContract: string) {
   return {
@@ -80,7 +66,10 @@ describe("EIP712CanonicalVectors", function () {
     expect(typeString("ClaimSubmission")).to.equal(VECTORS.typeStrings.ClaimSubmission);
     expect(typeString("VerificationIntent")).to.equal(VECTORS.typeStrings.VerificationIntent);
 
-    const encoderTypes = ethers.TypedDataEncoder.getTypes(TYPES);
+    const first = VECTORS.positives[0];
+    const encoderTypes = { ...TYPES, EIP712Domain: ethers.TypedDataEncoder.getPayload(
+      domainFor(first.chainId, first.verifyingContract), typesFor(first.primaryType), first.message
+    ).types.EIP712Domain };
     expect(encoderTypes.EIP712Domain.map((f) => f.type).join(",")).to.equal(
       "string,string,uint256,address"
     );
@@ -100,11 +89,11 @@ describe("EIP712CanonicalVectors", function () {
     for (const vector of VECTORS.positives) {
       const domain = domainFor(vector.chainId, vector.verifyingContract);
       expect(
-        ethers.TypedDataEncoder.hashStruct(vector.primaryType, TYPES, vector.message),
+        ethers.TypedDataEncoder.hashStruct(vector.primaryType, typesFor(vector.primaryType), vector.message),
         `${vector.caseId} structHash`
       ).to.equal(vector.structHash);
       expect(
-        ethers.TypedDataEncoder.hash(domain, TYPES, vector.message),
+        ethers.TypedDataEncoder.hash(domain, typesFor(vector.primaryType), vector.message),
         `${vector.caseId} digest`
       ).to.equal(vector.digest);
     }
@@ -144,7 +133,7 @@ describe("EIP712CanonicalVectors", function () {
               : {}),
             ...(negative.mutation === "domainName" ? { name: negative.mutationValue } : {}),
           };
-          expect(ethers.TypedDataEncoder.hash(domain, TYPES, negative.message), negative.caseId).to.equal(
+          expect(ethers.TypedDataEncoder.hash(domain, typesFor(negative.primaryType), negative.message), negative.caseId).to.equal(
             negative.digest
           );
           break;
@@ -156,7 +145,7 @@ describe("EIP712CanonicalVectors", function () {
           expect(
             ethers.TypedDataEncoder.hash(
               domainFor(negative.chainId, negative.verifyingContract),
-              TYPES,
+              typesFor(negative.primaryType),
               negative.message
             ),
             negative.caseId
@@ -164,6 +153,12 @@ describe("EIP712CanonicalVectors", function () {
           break;
         }
         case "fieldOrder": {
+          if (negative.primaryType === "VerificationIntent") {
+            const fields = TYPES.VerificationIntent;
+            const reordered = { VerificationIntent: [fields[1], fields[0], ...fields.slice(2)] };
+            expect(ethers.TypedDataEncoder.hash(domainFor(negative.chainId, negative.verifyingContract), reordered, negative.message)).to.equal(negative.digest);
+            break;
+          }
           // Same type hash, claimant and bountyId encoded in the other order.
           const encoded = abi.encode(
             ["bytes32", "uint256", "address", "bytes32", "uint256", "uint256"],
@@ -191,7 +186,6 @@ describe("EIP712CanonicalVectors", function () {
         }
         case "typeString": {
           const mutatedTypes = {
-            ...TYPES,
             ClaimSubmission: TYPES.ClaimSubmission.map((f) =>
               f.name === "nonce" ? { name: "nonce", type: "uint8" } : f
             ),
@@ -216,7 +210,7 @@ describe("EIP712CanonicalVectors", function () {
         }
         case "deadlineExpired": {
           // The digest is the positive one; only the deadline check rejects it.
-          expect(negative.digest).to.equal(claim.digest);
+          expect(negative.digest).to.equal(negative.primaryType === "VerificationIntent" ? intent.digest : claim.digest);
           expect(negative.expectedRevert).to.equal("SignatureExpired");
           break;
         }
@@ -229,7 +223,7 @@ describe("EIP712CanonicalVectors", function () {
     expect(
       ethers.TypedDataEncoder.hash(
         domainFor(intent.chainId, intent.verifyingContract),
-        TYPES,
+        typesFor("VerificationIntent"),
         vectorById("intent-wrong-approve-flag").message
       )
     ).to.equal(vectorById("intent-wrong-approve-flag").digest);
@@ -253,7 +247,7 @@ describe("EIP712CanonicalVectors", function () {
         claim.nonce,
         claim.deadline
       )
-    ).to.equal(ethers.TypedDataEncoder.hash(domain, TYPES, claim));
+    ).to.equal(ethers.TypedDataEncoder.hash(domain, typesFor("ClaimSubmission"), claim));
 
     expect(
       await verifier.getVerificationIntentHash(
@@ -264,11 +258,11 @@ describe("EIP712CanonicalVectors", function () {
         intent.nonce,
         intent.deadline
       )
-    ).to.equal(ethers.TypedDataEncoder.hash(domain, TYPES, intent));
+    ).to.equal(ethers.TypedDataEncoder.hash(domain, typesFor("VerificationIntent"), intent));
 
     // Chain 10 digest of the same struct is a different digest (chain binding).
-    expect(ethers.TypedDataEncoder.hash(domainFor(10, CANONICAL_VERIFYING_CONTRACT), TYPES, claim)).to.not.equal(
-      ethers.TypedDataEncoder.hash(domain, TYPES, claim)
+    expect(ethers.TypedDataEncoder.hash(domainFor(10, CANONICAL_VERIFYING_CONTRACT), typesFor("ClaimSubmission"), claim)).to.not.equal(
+      ethers.TypedDataEncoder.hash(domain, typesFor("ClaimSubmission"), claim)
     );
   });
 
@@ -279,11 +273,11 @@ describe("EIP712CanonicalVectors", function () {
     expect(claimant.address).to.equal(local.message.claimant);
 
     const domain = domainFor(local.chainId, CANONICAL_VERIFYING_CONTRACT);
-    const digest = ethers.TypedDataEncoder.hash(domain, TYPES, local.message);
+    const digest = ethers.TypedDataEncoder.hash(domain, typesFor("ClaimSubmission"), local.message);
     expect(digest).to.equal(local.digest);
 
-    const signature = await claimant.signTypedData(domain, TYPES, local.message);
-    expect(ethers.verifyTypedData(domain, TYPES, local.message, signature)).to.equal(claimant.address);
+    const signature = await claimant.signTypedData(domain, typesFor("ClaimSubmission"), local.message);
+    expect(ethers.verifyTypedData(domain, typesFor("ClaimSubmission"), local.message, signature)).to.equal(claimant.address);
 
     expect(await verifier.getNonce(claimant.address)).to.equal(BigInt(local.message.nonce));
 
@@ -300,7 +294,7 @@ describe("EIP712CanonicalVectors", function () {
     expect(await verifier.getNonce(claimant.address)).to.equal(BigInt(local.message.nonce) + 1n);
     expect(await verifier.isSignatureUsed(digest)).to.equal(true);
 
-    // Replay protection.
+    // Replay protection: the advanced nonce produces a different digest.
     await expect(
       verifier.verifyClaimSubmission(
         claimant.address,
@@ -309,7 +303,7 @@ describe("EIP712CanonicalVectors", function () {
         local.message.deadline,
         signature
       )
-    ).to.be.revertedWithCustomError(verifier, "SignatureAlreadyUsed");
+    ).to.be.revertedWithCustomError(verifier, "InvalidSignature");
   });
 
   it("rejects signatures over mutated, cross-chain and cross-deployment digests", async function () {
@@ -321,7 +315,7 @@ describe("EIP712CanonicalVectors", function () {
     // Wrong signing key.
     const wrongKeySignature = await signers[2].signTypedData(
       domainFor(chainId, CANONICAL_VERIFYING_CONTRACT),
-      TYPES,
+      typesFor("ClaimSubmission"),
       { ...local.message, nonce: await verifier.getNonce(claimant.address) }
     );
     await expect(
@@ -337,7 +331,7 @@ describe("EIP712CanonicalVectors", function () {
     // Chain-id mutation: signed for chain 10, offered on this chain.
     const crossChainSignature = await claimant.signTypedData(
       domainFor(10, CANONICAL_VERIFYING_CONTRACT),
-      TYPES,
+      typesFor("ClaimSubmission"),
       { ...local.message, nonce: await verifier.getNonce(claimant.address) }
     );
     await expect(
@@ -353,7 +347,7 @@ describe("EIP712CanonicalVectors", function () {
     // Verifying-contract mutation: signed for a different deployment.
     const otherDeploymentSignature = await claimant.signTypedData(
       domainFor(chainId, vectorById("claim-wrong-verifying-contract").mutationValue),
-      TYPES,
+      typesFor("ClaimSubmission"),
       { ...local.message, nonce: await verifier.getNonce(claimant.address) }
     );
     await expect(
@@ -370,6 +364,36 @@ describe("EIP712CanonicalVectors", function () {
     expect(await verifier.getNonce(claimant.address)).to.equal(BigInt(local.message.nonce) + 1n);
   });
 
+  it("rejects every verification-intent mutation with InvalidSignature", async function () {
+    const signer = (await ethers.getSigners())[2];
+    const chainId = (await ethers.provider.getNetwork()).chainId;
+    const domain = domainFor(chainId, CANONICAL_VERIFYING_CONTRACT);
+    const nonce = await verifier.getNonce(signer.address);
+    const message = { ...vectorById("verification-intent-mainnet").message, verifier: signer.address, nonce };
+    const fields = TYPES.VerificationIntent;
+    const cases = [
+      { domain: { ...domain, chainId: 10 } },
+      { domain: { ...domain, verifyingContract: vectorById("intent-wrong-verifying-contract").mutationValue } },
+      { domain: { ...domain, name: "TruthBountyV2" } },
+      { types: { VerificationIntent: [fields[1], fields[0], ...fields.slice(2)] } },
+      { message: { ...message, nonce: nonce + 1n } },
+      { message: { ...message, deadline: message.deadline + 1 } },
+      { message: { ...message, approve: false } },
+      { message: { ...message, reason: message.reason + " " } },
+    ];
+    for (const mutation of cases) {
+      const signature = await signer.signTypedData(mutation.domain ?? domain,
+        mutation.types ?? typesFor("VerificationIntent"), mutation.message ?? message);
+      await expect(verifier.verifyVerificationIntent(signer.address, message.bountyId, message.approve,
+        message.reason, message.deadline, signature)).to.be.revertedWithCustomError(verifier, "InvalidSignature");
+      expect(await verifier.getNonce(signer.address)).to.equal(nonce);
+    }
+    const signature = await signer.signTypedData(domain, typesFor("VerificationIntent"), message);
+    await expect(verifier.verifyVerificationIntent(signer.address, message.bountyId, message.approve,
+      message.reason, message.deadline, signature)).to.emit(verifier, "VerificationIntentVerified");
+    expect(await verifier.getNonce(signer.address)).to.equal(nonce + 1n);
+  });
+
   // Runs last on purpose: it moves the chain clock past the canonical deadline.
   it("bounds the deadline inclusively and rejects expired signatures", async function () {
     const signers = await ethers.getSigners();
@@ -383,7 +407,7 @@ describe("EIP712CanonicalVectors", function () {
 
     // Exactly at the deadline the signature is still valid (inclusive bound).
     const atDeadlineDomain = domainFor(chainId, CANONICAL_VERIFYING_CONTRACT);
-    const atDeadlineSignature = await claimant.signTypedData(atDeadlineDomain, TYPES, message);
+    const atDeadlineSignature = await claimant.signTypedData(atDeadlineDomain, typesFor("ClaimSubmission"), message);
     await time.setNextBlockTimestamp(deadline);
     await verifier.verifyClaimSubmission(
       claimant.address,
@@ -396,7 +420,7 @@ describe("EIP712CanonicalVectors", function () {
 
     // One second later the same shape of signature is rejected as expired.
     const expiredNonce = await verifier.getNonce(claimant.address);
-    const expiredSignature = await claimant.signTypedData(atDeadlineDomain, TYPES, {
+    const expiredSignature = await claimant.signTypedData(atDeadlineDomain, typesFor("ClaimSubmission"), {
       ...message,
       nonce: expiredNonce,
     });

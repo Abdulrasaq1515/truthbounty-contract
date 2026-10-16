@@ -18,7 +18,7 @@
  *
  * Usage
  *   node scripts/check-eip712-vectors.mjs           # check (CI); non-zero exit on drift
- *   node scripts/check-eip712-vectors.mjs --emit    # deterministically regenerate the JSON
+ *   node scripts/check-eip712-vectors.mjs --emit    # deterministically regenerate JSON and Solidity mirror
  *
  * No private key and no signature is stored anywhere in this repository: signature tests derive
  * material at runtime from the publicly documented Hardhat test key.
@@ -32,6 +32,7 @@ import { ethers } from "ethers";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = resolve(__dirname, "..");
 export const VECTORS_PATH = resolve(REPO_ROOT, "test/vectors/eip712-verifier.vectors.json");
+export const DOCUMENTATION_PATH = resolve(REPO_ROOT, "docs/EIP712_SIGNING.md");
 export const CONSTANTS_PATH = resolve(REPO_ROOT, "contracts/test/EIP712CanonicalVectors.sol");
 export const IMPLEMENTATION_PATHS = [
   "contracts/EIP712Verifier.sol",
@@ -49,7 +50,7 @@ export const DOMAIN_TYPE_STRING =
   "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)";
 export const CLAIM_TYPE_STRING =
   "ClaimSubmission(address claimant,uint256 bountyId,bytes32 contentHash,uint256 nonce,uint256 deadline)";
-export const INTENT_TYPE_STRING =
+export const VERIFICATION_INTENT_TYPE_STRING =
   "VerificationIntent(address verifier,uint256 bountyId,bool approve,string reason,uint256 nonce,uint256 deadline)";
 export const MUTATED_CLAIM_TYPE_STRING =
   "ClaimSubmission(address claimant,uint256 bountyId,bytes32 contentHash,uint8 nonce,uint256 deadline)";
@@ -72,14 +73,13 @@ export const TYPES = {
     { name: "nonce", type: "uint256" },
     { name: "deadline", type: "uint256" },
   ],
-  VerificationIntent: [
-    { name: "verifier", type: "address" },
-    { name: "bountyId", type: "uint256" },
-    { name: "approve", type: "bool" },
-    { name: "reason", type: "string" },
-    { name: "nonce", type: "uint256" },
-    { name: "deadline", type: "uint256" },
-  ],
+  VerificationIntent: VERIFICATION_INTENT_TYPE_STRING
+    .slice("VerificationIntent(".length, -1)
+    .split(",")
+    .map((field) => {
+      const [type, name] = field.split(" ");
+      return { name, type };
+    }),
 };
 
 /** `uint8 nonce` variant used only as a negative vector (type-string drift). */
@@ -400,6 +400,26 @@ export async function buildVectors() {
     },
   ];
 
+  const intentBase = positives.find((v) => v.caseId === "verification-intent-mainnet");
+  const intentMutation = (id, mutation, mutationValue, message, hash, domain = domainSeparators[String(CHAIN_ID_MAINNET)]) => ({
+    ...vector(id, "verificationIntent", CHAIN_ID_MAINNET, message, hash, digestOfStruct(domain, hash)),
+    mutation, mutationValue, mustDifferFrom: intentBase.caseId, expectedRevert: "InvalidSignature",
+  });
+  negatives.push(
+    intentMutation("intent-wrong-chain-id", "chainId", CHAIN_ID_WRONG, INTENT_A, intentBase.structHash, wrongChainDomain),
+    intentMutation("intent-wrong-verifying-contract", "verifyingContract", WRONG_VERIFYING_CONTRACT, INTENT_A, intentBase.structHash, wrongContractDomain),
+    intentMutation("intent-wrong-domain-name", "domainName", "TruthBountyV2", INTENT_A, intentBase.structHash, wrongNameDomain),
+  );
+  for (const [field, value] of [["nonce", INTENT_A.nonce + 1], ["deadline", CANONICAL_DEADLINE + 1]]) {
+    const message = { ...INTENT_A, [field]: value };
+    negatives.push(intentMutation(`intent-wrong-${field}`, field, value, message, structHash("VerificationIntent", message)));
+  }
+  const swappedFields = { VerificationIntent: [TYPES.VerificationIntent[1], TYPES.VerificationIntent[0], ...TYPES.VerificationIntent.slice(2)] };
+  negatives.push(intentMutation("intent-mutated-field-order", "fieldOrder", "verifier<->bountyId", INTENT_A,
+    structHash("VerificationIntent", INTENT_A, swappedFields)));
+  negatives.push({ ...intentBase, caseId: "intent-expired-deadline", mutation: "deadlineExpired",
+    mutationValue: "block.timestamp > deadline", mustDifferFrom: null, expectedRevert: "SignatureExpired" });
+
   return {
     schema: SUITE,
     description:
@@ -418,7 +438,7 @@ export async function buildVectors() {
     },
     typeStrings: {
       ClaimSubmission: CLAIM_TYPE_STRING,
-      VerificationIntent: INTENT_TYPE_STRING,
+      VerificationIntent: VERIFICATION_INTENT_TYPE_STRING,
     },
     entryPoints: {
       ClaimSubmission:
@@ -432,7 +452,7 @@ export async function buildVectors() {
       nameHash: ethers.id(DOMAIN_NAME),
       versionHash: ethers.id(DOMAIN_VERSION),
       ClaimSubmission: ethers.id(CLAIM_TYPE_STRING),
-      VerificationIntent: ethers.id(INTENT_TYPE_STRING),
+      VerificationIntent: ethers.id(VERIFICATION_INTENT_TYPE_STRING),
     },
     domainSeparators,
     deadlineSemantics:
@@ -449,6 +469,18 @@ export function expectedConstants(doc) {
   const byId = Object.fromEntries(doc.positives.map((v) => [v.caseId, v]));
   const negById = Object.fromEntries(doc.negatives.map((v) => [v.caseId, v]));
   return {
+    CHAIN_ID_MAINNET: { value: CHAIN_ID_MAINNET, kind: "uint256" },
+    CHAIN_ID_LOCAL: { value: CHAIN_ID_LOCAL, kind: "uint256" },
+    CHAIN_ID_WRONG: { value: CHAIN_ID_WRONG, kind: "uint256" },
+    BOUNTY_ID_A: { value: CLAIM_A.bountyId, kind: "uint256" },
+    BOUNTY_ID_B: { value: CLAIM_B.bountyId, kind: "uint256" },
+    CLAIM_NONCE_A: { value: CLAIM_A.nonce, kind: "uint256" },
+    CLAIM_NONCE_B: { value: CLAIM_B.nonce, kind: "uint256" },
+    INTENT_NONCE_A: { value: INTENT_A.nonce, kind: "uint256" },
+    INTENT_NONCE_B: { value: INTENT_B.nonce, kind: "uint256" },
+    CANONICAL_DEADLINE: { value: CANONICAL_DEADLINE, kind: "uint256" },
+    ...Object.fromEntries(doc.negatives.filter((v) => v.caseId.startsWith("intent-") && v.mustDifferFrom)
+      .map((v) => [v.caseId.replaceAll("-", "_").toUpperCase() + "_DIGEST", { value: v.digest, kind: "bytes32" }])),
     VERIFYING_CONTRACT: { value: VERIFYING_CONTRACT, kind: "address" },
     CLAIMANT_A: { value: CLAIMANT_A, kind: "address" },
     CLAIMANT_B: { value: CLAIMANT_B, kind: "address" },
@@ -499,11 +531,6 @@ export function expectedConstants(doc) {
       value: negById["claim-mutated-type-string"].digest,
       kind: "bytes32",
     },
-    INTENT_WRONG_APPROVE_FLAG_DIGEST: {
-      value: negById["intent-wrong-approve-flag"].digest,
-      kind: "bytes32",
-    },
-    INTENT_WRONG_REASON_DIGEST: { value: negById["intent-wrong-reason"].digest, kind: "bytes32" },
     CLAIM_MUTATED_FIELD_ORDER_STRUCT_HASH: {
       value: negById["claim-mutated-field-order"].structHash,
       kind: "bytes32",
@@ -533,7 +560,7 @@ export function expectedConstants(doc) {
 export function extractConstants(soliditySource) {
   const found = {};
   const re =
-    /(?:bytes32|address|string)\s+internal\s+constant\s+(\w+)\s*=\s*(0x[0-9a-fA-F]+|"[^"]*")\s*;/g;
+    /(?:bytes32|address|string|uint256)\s+internal\s+constant\s+(\w+)\s*=\s*(0x[0-9a-fA-F]+|[0-9]+|"[^"]*")\s*;/g;
   let match;
   while ((match = re.exec(soliditySource)) !== null) {
     found[match[1]] = match[2].startsWith('"') ? match[2].slice(1, -1) : match[2];
@@ -546,6 +573,7 @@ export function compareConstants(soliditySource, expected) {
   const found = extractConstants(soliditySource);
   const problems = [];
   const normalise = (value, kind) => {
+    if (kind === "uint256") return String(value);
     if (kind === "string") return value;
     if (kind !== "address") return value.toLowerCase();
     try {
@@ -578,14 +606,16 @@ export function compareConstants(soliditySource, expected) {
 export function compareImplementations(sources) {
   const problems = [];
   for (const [path, source] of Object.entries(sources)) {
+    const code = source.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
     for (const [label, typeString] of [
-      ["domain", DOMAIN_TYPE_STRING],
-      ["ClaimSubmission", CLAIM_TYPE_STRING],
-      ["VerificationIntent", INTENT_TYPE_STRING],
+      ["_DOMAIN_TYPE_HASH", DOMAIN_TYPE_STRING],
+      ["CLAIM_SUBMISSION_TYPEHASH", CLAIM_TYPE_STRING],
+      ["VERIFICATION_INTENT_TYPEHASH", VERIFICATION_INTENT_TYPE_STRING],
     ]) {
-      if (!source.includes(`"${typeString}"`)) {
+      const declaration = code.match(new RegExp(`bytes32\\s+(?:private|public|internal)\\s+constant\\s+${label}\\s*=\\s*keccak256\\(\\s*"([^"]*)"\\s*\\)\\s*;`));
+      if (declaration?.[1] !== typeString) {
         problems.push(
-          `${path} does not declare the canonical ${label} type string\n    expected "${typeString}"`
+          `${path} does not declare the canonical ${label} type string\n    expected "${typeString}"; found ${declaration ? JSON.stringify(declaration[1]) : "missing keccak256 declaration"}`
         );
       }
     }
@@ -648,30 +678,31 @@ export async function checkSignatureRecovery(domain, primaryType, message, expec
   }
 }
 
-function readImplSources() {
+function readImplSources(root = REPO_ROOT) {
   const sources = {};
   for (const path of IMPLEMENTATION_PATHS) {
-    sources[path] = readFileSync(resolve(REPO_ROOT, path), "utf8");
+    sources[path] = readFileSync(resolve(root, path), "utf8");
   }
   return sources;
 }
 
-export async function runCheck() {
+export async function runCheck(root = REPO_ROOT) {
   const expected = await buildVectors();
   const problems = [];
 
-  const actual = JSON.parse(readFileSync(VECTORS_PATH, "utf8"));
-  problems.push(...compareDocuments(expected, actual, "vectors"));
+  const actual = JSON.parse(readFileSync(resolve(root, "test/vectors/eip712-verifier.vectors.json"), "utf8"));
+  problems.push(...compareDocuments(expected, actual, "test/vectors/eip712-verifier.vectors.json"));
 
-  const solidity = readFileSync(CONSTANTS_PATH, "utf8");
-  problems.push(...compareConstants(solidity, expectedConstants(expected)));
-  problems.push(...compareImplementations(readImplSources()));
+  const solidity = readFileSync(resolve(root, "contracts/test/EIP712CanonicalVectors.sol"), "utf8");
+  problems.push(...compareConstants(solidity, expectedConstants(expected)).map((p) => `contracts/test/EIP712CanonicalVectors.sol: ${p}`));
+  problems.push(...compareDocumentation(readFileSync(resolve(root, "docs/EIP712_SIGNING.md"), "utf8"), expected));
+  problems.push(...compareImplementations(readImplSources(root)));
 
   if (problems.length > 0) {
     console.error(`EIP-712 drift detected (${problems.length} difference(s)):\n`);
     for (const problem of problems) console.error(`  - ${problem}`);
     console.error(
-      "\nRegenerate with `node scripts/check-eip712-vectors.mjs --emit`, then update contracts/test/EIP712CanonicalVectors.sol from the JSON."
+      "\nRegenerate with `node scripts/check-eip712-vectors.mjs --emit`, after reviewing the canonical source; JSON and Solidity mirror are regenerated together."
     );
     throw new Error("EIP-712 canonical vectors are out of date");
   }
@@ -688,29 +719,55 @@ export async function runCheck() {
   return expected;
 }
 
+/** Render the entire mirror from canonical inputs, including numeric payload fields. */
+export function renderConstants(doc) {
+  const lines = Object.entries(expectedConstants(doc)).map(([name, { kind, value }]) =>
+    `    ${kind} internal constant ${name} = ${kind === "string" ? JSON.stringify(value) : value};`);
+  return `// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+/// @notice Test-only mirror of test/vectors/eip712-verifier.vectors.json.
+/// @dev Generated by node scripts/check-eip712-vectors.mjs --emit. Do not edit.
+library EIP712CanonicalVectors {
+${lines.join("\n")}
+
+    function claimAContentHash() internal pure returns (bytes32) {
+        return keccak256(bytes(CLAIM_A_CONTENT));
+    }
+
+    function claimBContentHash() internal pure returns (bytes32) {
+        return keccak256(bytes(CLAIM_B_CONTENT));
+    }
+}
+`;
+}
+
+export function compareDocumentation(source, doc) {
+  const row = `| \`VerificationIntent\` | \`${doc.typeStrings.VerificationIntent}\` | \`${doc.constants.VerificationIntent}\` |`;
+  return source.includes(row) ? [] : [
+    `docs/EIP712_SIGNING.md: VerificationIntent row drift; expected ${row}`,
+  ];
+}
+
+export async function emitVectors(root = REPO_ROOT) {
+  const problems = compareImplementations(readImplSources(root));
+  if (problems.length) throw new Error(problems.join("\n"));
+  const doc = await buildVectors();
+  writeFileSync(resolve(root, "test/vectors/eip712-verifier.vectors.json"), `${JSON.stringify(doc, null, 2)}\n`);
+  writeFileSync(resolve(root, "contracts/test/EIP712CanonicalVectors.sol"), renderConstants(doc));
+  return doc;
+}
+
 const isDirectRun =
   process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 
 if (isDirectRun) {
-  const emit = process.argv.includes("--emit");
-  buildVectors()
-    .then((doc) => {
-      if (emit) {
-        writeFileSync(VECTORS_PATH, `${JSON.stringify(doc, null, 2)}\n`);
-        console.log(`wrote ${VECTORS_PATH}`);
-        return null;
-      }
-      return runCheck();
-    })
-    .then((doc) => {
-      if (doc) {
-        console.log(
-          `EIP-712 vectors OK: ${doc.positives.length} positive, ${doc.negatives.length} negative, ${IMPLEMENTATION_PATHS.length} implementations verified`
-        );
-      }
-    })
+  (process.argv.includes("--emit") ? emitVectors() : runCheck())
+    .then((doc) => console.log(
+      `EIP-712 vectors OK: ${doc.positives.length} positive, ${doc.negatives.length} negative, ${IMPLEMENTATION_PATHS.length} implementations verified`
+    ))
     .catch((error) => {
-      console.error(error.message);
+      console.error(`scripts/check-eip712-vectors.mjs: ${error.message}`);
       process.exitCode = 1;
     });
 }
