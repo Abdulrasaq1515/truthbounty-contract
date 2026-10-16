@@ -119,7 +119,23 @@ library V2Errors {
     error InvalidNonce(address contributor, uint256 expected, uint256 provided);
 
     /// @notice Pagination limit out of bounds.
+    /// @param limit Requested page size that violated the configured bounds.
     error InvalidPageLimit(uint256 limit);
+
+    /// @notice Pagination cursor does not bind the requested claim/release/order context.
+    /// @param claimId Claim the cursor was expected to bind.
+    /// @param releaseId Release the cursor was expected to bind.
+    /// @param orderKey Ordering key the cursor was expected to bind.
+    error InvalidEvidenceCursor(uint256 claimId, uint256 releaseId, bytes32 orderKey);
+
+    /// @notice Evidence ordering key is malformed or non-monotonic.
+    /// @param orderKey Offending ordering key.
+    error InvalidEvidenceOrder(bytes32 orderKey);
+
+    /// @notice Evidence page bounds are inverted or otherwise invalid.
+    /// @param fromKey Inclusive lower ordering key.
+    /// @param toKey Exclusive upper ordering key.
+    error InvalidEvidenceBounds(bytes32 fromKey, bytes32 toKey);
 
     // =========================================================================
     // Verification
