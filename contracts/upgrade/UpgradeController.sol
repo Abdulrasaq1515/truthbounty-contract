@@ -57,6 +57,35 @@ contract UpgradeController is IUpgradeController, AccessControl, ReentrancyGuard
     bytes32[] internal _allProposalIds;
     mapping(bytes32 => bool) internal _proposalExists;
 
+    /// @notice Reinitializer version tag for the migration manifest scheme (V2-SC-077).
+    /// @dev = keccak256("TruthBounty.UpgradeController.migrationManifest.v2").
+    bytes32 public constant MIGRATION_MANIFEST_SCHEME_V2 = keccak256("TruthBounty.UpgradeController.migrationManifest.v2");
+
+    /// @notice A single ordered migration step bound to a target contract.
+    struct MigrationStep {
+        bytes32 stepId;
+        address targetContract;
+        uint256 reinitializerVersion;
+        bytes32 prerequisiteStepId;
+        bytes32 codeHash;
+        bool registered;
+        bool completed;
+        uint256 completedAt;
+    }
+
+    /// @notice Per-target migration manifest recording completed reinitializer versions.
+    struct MigrationManifest {
+        uint256 lastCompletedVersion;
+        uint256 completedCount;
+        bytes32 lastCompletedStepId;
+        bool initialized;
+    }
+
+    mapping(bytes32 => MigrationStep) internal _migrationSteps;
+    mapping(address => MigrationManifest) internal _migrationManifests;
+    mapping(address => mapping(uint256 => bytes32)) internal _versionToStepId;
+    mapping(address => bytes32[]) internal _migrationOrder;
+
     error ProposalNotFound(bytes32 proposalId);
     error ProposalNotScheduled(bytes32 proposalId);
     error ProposalNotProposed(bytes32 proposalId);
@@ -71,6 +100,14 @@ contract UpgradeController is IUpgradeController, AccessControl, ReentrancyGuard
     error UpgradeHashMismatch();
     error RollbackUnsafe(bytes32 proposalId);
     error UnauthorizedEmergency();
+    error MigrationStepAlreadyRegistered(bytes32 stepId);
+    error MigrationStepNotFound(bytes32 stepId);
+    error MigrationStepAlreadyCompleted(bytes32 stepId);
+    error MigrationPrerequisiteNotMet(bytes32 stepId, bytes32 prerequisiteStepId);
+    error MigrationVersionOutOfOrder(address targetContract, uint256 expected, uint256 provided);
+    error MigrationVersionAlreadyCompleted(address targetContract, uint256 version);
+    error MigrationCodeHashMismatch(bytes32 stepId, bytes32 expected, bytes32 actual);
+    error MigrationTargetMismatch(bytes32 stepId, address expected, address provided);
 
     modifier onlyUpgradeRole() {
         if (!hasRole(UPGRADE_ROLE, msg.sender) && !hasRole(DEFAULT_ADMIN_ROLE, msg.sender)) {
@@ -103,6 +140,16 @@ contract UpgradeController is IUpgradeController, AccessControl, ReentrancyGuard
         versionRegistry = IVersionRegistry(_versionRegistry);
         storageValidator = StorageCompatibilityValidator(_storageValidator);
     }
+
+    event MigrationStepRegistered(
+        bytes32 indexed stepId,
+        address indexed targetContract,
+        uint256 reinitializerVersion,
+        bytes32 prerequisiteStepId,
+        bytes32 codeHash
+    );
+    event MigrationStepCompleted(bytes32 indexed stepId, address indexed targetContract, uint256 reinitializerVersion, uint256 completedAt);
+    event MigrationManifestUpdated(address indexed targetContract, uint256 lastCompletedVersion, uint256 completedCount, bytes32 lastCompletedStepId);
 
     function proposeUpgrade(
         address targetContract,
@@ -366,5 +413,153 @@ contract UpgradeController is IUpgradeController, AccessControl, ReentrancyGuard
 
     function getProposalCount() external view returns (uint256) {
         return _allProposalIds.length;
+    }
+
+    // ============ Reinitializer / Migration Ordering (V2-SC-077) ============
+
+    /**
+     * @notice Register an ordered migration step for a target contract.
+     * @dev Prerequisites are machine-verifiable: the prerequisite step must be registered and
+     *      completed before this step can execute. Versions must be strictly increasing per target.
+     */
+    function registerMigrationStep(
+        address targetContract,
+        uint256 reinitializerVersion,
+        bytes32 prerequisiteStepId,
+        bytes32 codeHash
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) returns (bytes32 stepId) {
+        if (targetContract == address(0)) revert InvalidTarget(targetContract);
+        if (reinitializerVersion == 0) revert InvalidVersion("reinitializerVersion");
+        if (codeHash == bytes32(0)) revert InvalidImplementation(address(0));
+
+        stepId = keccak256(abi.encode(MIGRATION_MANIFEST_SCHEME_V2, targetContract, reinitializerVersion, codeHash));
+        if (_migrationSteps[stepId].registered) revert MigrationStepAlreadyRegistered(stepId);
+
+        MigrationManifest storage manifest = _migrationManifests[targetContract];
+        if (reinitializerVersion <= manifest.lastCompletedVersion) {
+            revert MigrationVersionAlreadyCompleted(targetContract, reinitializerVersion);
+        }
+        if (_versionToStepId[targetContract][reinitializerVersion] != bytes32(0)) {
+            revert MigrationVersionAlreadyCompleted(targetContract, reinitializerVersion);
+        }
+
+        if (prerequisiteStepId != bytes32(0)) {
+            MigrationStep storage prereq = _migrationSteps[prerequisiteStepId];
+            if (!prereq.registered) revert MigrationStepNotFound(prerequisiteStepId);
+            if (prereq.targetContract != targetContract) {
+                revert MigrationTargetMismatch(prerequisiteStepId, prereq.targetContract, targetContract);
+            }
+        }
+
+        _migrationSteps[stepId] = MigrationStep({
+            stepId: stepId,
+            targetContract: targetContract,
+            reinitializerVersion: reinitializerVersion,
+            prerequisiteStepId: prerequisiteStepId,
+            codeHash: codeHash,
+            registered: true,
+            completed: false,
+            completedAt: 0
+        });
+        _versionToStepId[targetContract][reinitializerVersion] = stepId;
+        _migrationOrder[targetContract].push(stepId);
+
+        emit MigrationStepRegistered(stepId, targetContract, reinitializerVersion, prerequisiteStepId, codeHash);
+    }
+
+    /**
+     * @notice Execute a registered migration step atomically.
+     * @dev Enforces: step registered, not already completed, prerequisite completed, version
+     *      strictly greater than last completed version, and code hash matches the live target.
+     *      On any revert, no manifest state is mutated (atomicity).
+     */
+    function executeMigrationStep(bytes32 stepId) external onlyRole(DEFAULT_ADMIN_ROLE) nonReentrant whenNotPaused {
+        MigrationStep storage step = _migrationSteps[stepId];
+        if (!step.registered) revert MigrationStepNotFound(stepId);
+        if (step.completed) revert MigrationStepAlreadyCompleted(stepId);
+
+        if (step.prerequisiteStepId != bytes32(0)) {
+            MigrationStep storage prereq = _migrationSteps[step.prerequisiteStepId];
+            if (!prereq.completed) {
+                revert MigrationPrerequisiteNotMet(stepId, step.prerequisiteStepId);
+            }
+        }
+
+        MigrationManifest storage manifest = _migrationManifests[step.targetContract];
+        uint256 expectedVersion = manifest.lastCompletedVersion + 1;
+        if (step.reinitializerVersion != expectedVersion) {
+            revert MigrationVersionOutOfOrder(step.targetContract, expectedVersion, step.reinitializerVersion);
+        }
+
+        bytes32 actualCodeHash = step.targetContract.codehash;
+        if (actualCodeHash != step.codeHash) {
+            revert MigrationCodeHashMismatch(stepId, step.codeHash, actualCodeHash);
+        }
+
+        step.completed = true;
+        step.completedAt = block.timestamp;
+
+        manifest.lastCompletedVersion = step.reinitializerVersion;
+        manifest.completedCount += 1;
+        manifest.lastCompletedStepId = stepId;
+        manifest.initialized = true;
+
+        emit MigrationStepCompleted(stepId, step.targetContract, step.reinitializerVersion, block.timestamp);
+        emit MigrationManifestUpdated(step.targetContract, manifest.lastCompletedVersion, manifest.completedCount, stepId);
+    }
+
+    /**
+     * @notice Resume a partially-completed migration by executing the next pending step.
+     * @dev Safe to call after a partial failure: only the next ordered step is eligible.
+     */
+    function resumeMigration(address targetContract) external onlyRole(DEFAULT_ADMIN_ROLE) nonReentrant whenNotPaused returns (bytes32 stepId) {
+        bytes32[] storage order = _migrationOrder[targetContract];
+        for (uint256 i = 0; i < order.length; i++) {
+            MigrationStep storage step = _migrationSteps[order[i]];
+            if (!step.completed) {
+                stepId = order[i];
+                break;
+            }
+        }
+        if (stepId == bytes32(0)) revert MigrationStepNotFound(bytes32(0));
+
+        MigrationStep storage step = _migrationSteps[stepId];
+        if (step.prerequisiteStepId != bytes32(0) && !_migrationSteps[step.prerequisiteStepId].completed) {
+            revert MigrationPrerequisiteNotMet(stepId, step.prerequisiteStepId);
+        }
+
+        MigrationManifest storage manifest = _migrationManifests[targetContract];
+        uint256 expectedVersion = manifest.lastCompletedVersion + 1;
+        if (step.reinitializerVersion != expectedVersion) {
+            revert MigrationVersionOutOfOrder(targetContract, expectedVersion, step.reinitializerVersion);
+        }
+
+        bytes32 actualCodeHash = targetContract.codehash;
+        if (actualCodeHash != step.codeHash) {
+            revert MigrationCodeHashMismatch(stepId, step.codeHash, actualCodeHash);
+        }
+
+        step.completed = true;
+        step.completedAt = block.timestamp;
+        manifest.lastCompletedVersion = step.reinitializerVersion;
+        manifest.completedCount += 1;
+        manifest.lastCompletedStepId = stepId;
+        manifest.initialized = true;
+
+        emit MigrationStepCompleted(stepId, targetContract, step.reinitializerVersion, block.timestamp);
+        emit MigrationManifestUpdated(targetContract, manifest.lastCompletedVersion, manifest.completedCount, stepId);
+    }
+
+    function getMigrationStep(bytes32 stepId) external view returns (MigrationStep memory) {
+        if (!_migrationSteps[stepId].registered) revert MigrationStepNotFound(stepId);
+        return _migrationSteps[stepId];
+    }
+
+    function getMigrationManifest(address targetContract) external view returns (MigrationManifest memory) {
+        return _migrationManifests[targetContract];
+    }
+
+    function getMigrationOrder(address targetContract) external view returns (bytes32[] memory) {
+        return _migrationOrder[targetContract];
     }
 }

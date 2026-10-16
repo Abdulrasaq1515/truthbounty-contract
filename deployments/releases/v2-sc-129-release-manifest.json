@@ -5,6 +5,147 @@
   "protocolVersion": "2.0.0",
   "issue": "V2-SC-129",
   "description": "Approved release manifest for source, bytecode, and metadata reproducibility. Regenerate only via `node scripts/check-release-reproducibility.mjs --write-manifest` after maintainer review; any hand edit invalidates manifestDigest and fails verification. contracts/v2/SignatureNonces.sol is abstract (no bytecode by design) and is pinned under sources only; its code is covered transitively through inheriting modules' bytecode.",
+  "upgrade": {
+    "reinitializerVersions": [
+      {
+        "version": 1,
+        "name": "initializer",
+        "description": "Initial deployment initialization for all canonical V2 modules.",
+        "prerequisites": [],
+        "atomic": true,
+        "resumable": false,
+        "rollback": "redeploy"
+      },
+      {
+        "version": 2,
+        "name": "post-wave-9-migration",
+        "description": "Post-Wave-9 migration reinitializer for ordered state migration across canonical V2 modules.",
+        "prerequisites": [
+          "version:1"
+        ],
+        "atomic": true,
+        "resumable": true,
+        "rollback": "pause-and-recover"
+      }
+    ],
+    "migrationSteps": [
+      {
+        "step": 1,
+        "id": "verify-preconditions",
+        "description": "Machine-verify all preconditions before any state mutation.",
+        "prerequisites": [
+          "version:1"
+        ],
+        "atomic": true,
+        "resumable": false,
+        "rollback": "no-op"
+      },
+      {
+        "step": 2,
+        "id": "migrate-module-registry",
+        "description": "Migrate ModuleRegistry state to the post-Wave-9 layout.",
+        "prerequisites": [
+          "step:1"
+        ],
+        "atomic": true,
+        "resumable": true,
+        "rollback": "pause-and-recover"
+      },
+      {
+        "step": 3,
+        "id": "migrate-emergency-controls",
+        "description": "Migrate EmergencyControls state to operation-scoped emergency controls.",
+        "prerequisites": [
+          "step:2"
+        ],
+        "atomic": true,
+        "resumable": true,
+        "rollback": "pause-and-recover"
+      },
+      {
+        "step": 4,
+        "id": "migrate-consumer-guarantees",
+        "description": "Migrate ConsumerGuaranteesAnchor state to the pinned consumer interface.",
+        "prerequisites": [
+          "step:3"
+        ],
+        "atomic": true,
+        "resumable": true,
+        "rollback": "pause-and-recover"
+      },
+      {
+        "step": 5,
+        "id": "finalize-migration",
+        "description": "Finalize migration and record completed versions in the manifest.",
+        "prerequisites": [
+          "step:4"
+        ],
+        "atomic": true,
+        "resumable": false,
+        "rollback": "pause-and-recover"
+      }
+    ],
+    "preconditions": [
+      {
+        "id": "timelock-authority",
+        "description": "Timelock must hold the required role authority for migration execution.",
+        "machineVerifiable": true
+      },
+      {
+        "id": "implementation-match",
+        "description": "Target implementation must match the pinned canonical V2 artifact bytecode.",
+        "machineVerifiable": true
+      },
+      {
+        "id": "no-emergency-stop",
+        "description": "No operation-scoped emergency stop may be active for the migration scope.",
+        "machineVerifiable": true
+      },
+      {
+        "id": "ordered-execution",
+        "description": "Each migration step must execute exactly once and in declared order.",
+        "machineVerifiable": true
+      }
+    ],
+    "atomicity": {
+      "mode": "all-or-nothing-per-step",
+      "partialFailure": "revert-step-and-preserve-prior-state",
+      "unsafeStateExposure": "prevented-by-precondition-gates"
+    },
+    "resume": {
+      "supported": true,
+      "strategy": "resume-from-last-completed-step",
+      "repeatedStep": "rejected",
+      "outOfOrderStep": "rejected",
+      "skippedStep": "rejected"
+    },
+    "rollback": {
+      "supported": true,
+      "strategy": "pause-and-recover",
+      "recovery": "timelock-authorized-recovery"
+    },
+    "events": [
+      {
+        "name": "MigrationStepExecuted",
+        "description": "Emitted when a migration step completes successfully.",
+        "evidence": true
+      },
+      {
+        "name": "MigrationCompleted",
+        "description": "Emitted when all migration steps complete and versions are recorded.",
+        "evidence": true
+      },
+      {
+        "name": "MigrationRolledBack",
+        "description": "Emitted when a migration step is rolled back or recovery is initiated.",
+        "evidence": true
+      }
+    ],
+    "manifest": {
+      "recordsCompletedVersions": true,
+      "completedVersions": []
+    }
+  },
   "toolchain": {
     "solc": "0.8.28",
     "evmVersion": "cancun",
