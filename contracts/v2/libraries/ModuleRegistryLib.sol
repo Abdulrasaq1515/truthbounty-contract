@@ -2,6 +2,20 @@
 pragma solidity ^0.8.20;
 
 import {IModuleRegistry} from "../interfaces/IModuleRegistry.sol";
+import {IConfiguration} from "../interfaces/IConfiguration.sol";
+import {IClaims} from "../interfaces/IClaims.sol";
+import {IEvidence} from "../interfaces/IEvidence.sol";
+import {IStakeCustody} from "../interfaces/IStakeCustody.sol";
+import {IVerification} from "../interfaces/IVerification.sol";
+import {IAggregation} from "../interfaces/IAggregation.sol";
+import {ISettlement} from "../interfaces/ISettlement.sol";
+import {IDisputes} from "../interfaces/IDisputes.sol";
+import {IRewards} from "../interfaces/IRewards.sol";
+import {ISlashing} from "../interfaces/ISlashing.sol";
+import {ITreasury} from "../interfaces/ITreasury.sol";
+import {IReputationRoots} from "../interfaces/IReputationRoots.sol";
+import {IGovernanceHooks} from "../interfaces/IGovernanceHooks.sol";
+import {IEmergencyControls} from "../interfaces/IEmergencyControls.sol";
 
 /// @title ModuleRegistryLib
 /// @notice Canonical manifest and validation helpers for the V2 module registry.
@@ -32,21 +46,22 @@ library ModuleRegistryLib {
 
     uint8 internal constant CANONICAL_MODULE_COUNT = 14;
 
-    // Canonical ERC-165 interface IDs frozen by V2-SC-001. Each MUST equal type(IX).interfaceId.
-    bytes4 internal constant INTERFACE_CONFIGURATION = 0x6b73d71f;
-    bytes4 internal constant INTERFACE_CLAIMS = 0x38a3ec24;
-    bytes4 internal constant INTERFACE_EVIDENCE = 0x549aab2c;
-    bytes4 internal constant INTERFACE_STAKE_CUSTODY = 0x3e53b374;
-    bytes4 internal constant INTERFACE_VERIFICATION = 0x3833e81d;
-    bytes4 internal constant INTERFACE_AGGREGATION = 0xf06520f1;
-    bytes4 internal constant INTERFACE_SETTLEMENT = 0xd7d9d5f0;
-    bytes4 internal constant INTERFACE_DISPUTES = 0x98581ac8;
-    bytes4 internal constant INTERFACE_REWARDS = 0xe0e8be78;
-    bytes4 internal constant INTERFACE_SLASHING = 0x2bf473dd;
-    bytes4 internal constant INTERFACE_TREASURY = 0xd766ec85;
-    bytes4 internal constant INTERFACE_REPUTATION_ROOTS = 0x7b699d8e;
-    bytes4 internal constant INTERFACE_GOVERNANCE_HOOKS = 0x76228b23;
-    bytes4 internal constant INTERFACE_EMERGENCY_CONTROLS = 0x5c85bbe3;
+    // Derive each ERC-165 ID from its canonical interface so selector changes
+    // cannot leave the registry accepting a stale hand-copied value.
+    bytes4 internal constant INTERFACE_CONFIGURATION = type(IConfiguration).interfaceId;
+    bytes4 internal constant INTERFACE_CLAIMS = type(IClaims).interfaceId;
+    bytes4 internal constant INTERFACE_EVIDENCE = type(IEvidence).interfaceId;
+    bytes4 internal constant INTERFACE_STAKE_CUSTODY = type(IStakeCustody).interfaceId;
+    bytes4 internal constant INTERFACE_VERIFICATION = type(IVerification).interfaceId;
+    bytes4 internal constant INTERFACE_AGGREGATION = type(IAggregation).interfaceId;
+    bytes4 internal constant INTERFACE_SETTLEMENT = type(ISettlement).interfaceId;
+    bytes4 internal constant INTERFACE_DISPUTES = type(IDisputes).interfaceId;
+    bytes4 internal constant INTERFACE_REWARDS = type(IRewards).interfaceId;
+    bytes4 internal constant INTERFACE_SLASHING = type(ISlashing).interfaceId;
+    bytes4 internal constant INTERFACE_TREASURY = type(ITreasury).interfaceId;
+    bytes4 internal constant INTERFACE_REPUTATION_ROOTS = type(IReputationRoots).interfaceId;
+    bytes4 internal constant INTERFACE_GOVERNANCE_HOOKS = type(IGovernanceHooks).interfaceId;
+    bytes4 internal constant INTERFACE_EMERGENCY_CONTROLS = type(IEmergencyControls).interfaceId;
 
     uint256 internal constant DEPENDENCY_EDGE_COUNT = 11;
     uint16 internal constant MIN_MAJOR = 2;
