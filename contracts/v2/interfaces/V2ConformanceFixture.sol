@@ -19,7 +19,8 @@ contract V2ConformanceFixture is ERC165, IClaims, IAggregation {
     function protocolVersion() external pure override returns (uint16 major, uint16 minor) { return (2, 0); }
 
     function supportsInterface(bytes4 interfaceId) public view override(ERC165, IERC165) returns (bool) {
-        return interfaceId == type(IClaims).interfaceId || interfaceId == type(IAggregation).interfaceId || super.supportsInterface(interfaceId);
+        return interfaceId == type(IClaims).interfaceId || interfaceId == type(IAggregation).interfaceId
+            || interfaceId == type(IV2Module).interfaceId || super.supportsInterface(interfaceId);
     }
 
     function createClaim(bytes32 subject, uint256 reward, bytes calldata) external override returns (uint256 claimId) {
