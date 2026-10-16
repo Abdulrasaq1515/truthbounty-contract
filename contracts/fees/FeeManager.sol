@@ -120,6 +120,24 @@ contract FeeManager is IFeeManager, ReentrancyGuard, Pausable, GovernanceOwnable
     /// @notice Global governance version counter (bumped on every schedule update)
     uint256 public globalGovVersion;
 
+    // ============ SC-039 Events ============
+
+    /**
+     * @notice SC-039 — exact integer attribution for a fee-schedule change.
+     * @dev Emitted alongside `FeeScheduleUpdated` (which only carries the fixed
+     *      amount) so every parameter of the new schedule — fixed amount, basis
+     *      points, minimum, and maximum, all exact integers — is exposed on-chain
+     *      together with the governance version that authored it.
+     */
+    event FeeScheduleConfigUpdated(
+        bytes32 indexed feeType,
+        uint256 fixedAmount,
+        uint256 basisPoints,
+        uint256 minValue,
+        uint256 maxValue,
+        uint256 govVersion
+    );
+
     // ============ Errors ============
 
     error ZeroAmount();
@@ -130,6 +148,8 @@ contract FeeManager is IFeeManager, ReentrancyGuard, Pausable, GovernanceOwnable
     error InvalidBasisPoints(uint256 total);
     error TooManyAllocationTargets(uint256 count, uint256 max);
     error AllocationRecipientZero(bytes32 name);
+    error DuplicateAllocationName(bytes32 name);
+    error ReservedFeesOutstanding(uint256 reserved);
     error DuplicateFeeRecord(bytes32 recordId);
     error PageLimitExceeded(uint256 limit, uint256 max);
     error AllocationTransferFailed(bytes32 allocation);
@@ -488,6 +508,7 @@ contract FeeManager is IFeeManager, ReentrancyGuard, Pausable, GovernanceOwnable
         feeScheduleVersion[feeType] = newVersion;
 
         emit FeeScheduleUpdated(feeType, previousValue, fixedAmount);
+        emit FeeScheduleConfigUpdated(feeType, fixedAmount, basisPoints, minValue, maxValue, newVersion);
         emit ParameterUpdatedByGovernance(
             keccak256(abi.encode("FEE_SCHEDULE", feeType)),
             previousValue,
@@ -511,6 +532,15 @@ contract FeeManager is IFeeManager, ReentrancyGuard, Pausable, GovernanceOwnable
         uint256 totalBps = 0;
         bool hasTreasuryReserve = false;
         for (uint256 i = 0; i < targets.length; i++) {
+            // SC-039: a routing-table name may appear at most once. Duplicate
+            // names would split one fee across two recipients under a single
+            // attribution key (`_totalByAllocation`, `FeeDistributed`), which is
+            // duplicate routing with merged, unauditable accounting.
+            for (uint256 j = 0; j < i; j++) {
+                if (targets[j].name == targets[i].name) {
+                    revert DuplicateAllocationName(targets[i].name);
+                }
+            }
             if (targets[i].active) {
                 if (targets[i].recipient == address(0)) {
                     revert AllocationRecipientZero(targets[i].name);
@@ -558,6 +588,12 @@ contract FeeManager is IFeeManager, ReentrancyGuard, Pausable, GovernanceOwnable
      */
     function setFeeToken(address newToken) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (newToken == address(0)) revert ZeroAddress();
+        // SC-039: reserved fees were collected in the current fee token. Re-pointing
+        // the token while they are outstanding would make distribution pay out the
+        // *new* token for amounts collected in the *old* one — stranding the old
+        // balance and breaking the conservation equation
+        // `totalCollected == totalDistributed + reserved`.
+        if (_reservedFees != 0) revert ReservedFeesOutstanding(_reservedFees);
         address old = address(_feeToken);
         _feeToken = IERC20(newToken);
         emit FeeTokenUpdated(old, newToken);
