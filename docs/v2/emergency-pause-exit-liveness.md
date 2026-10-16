@@ -172,6 +172,33 @@ exits permanently on its own authority.
   A settlement-only pause freezes outcomes while staking and exits continue. Scopes that no
   canonical module gates on today (`TREASURY`, `DISPUTES`) change nothing.
 
+## 4.1 Read-only status and recovery matrix
+
+`view` and `pure` calls remain callable under local, scoped, nested, global, and protocol-level
+pauses. Their return values describe the state observed at the call; they do not authorize a later
+transaction. Every submitted mutation must still satisfy its role, lifecycle, pause, and shutdown
+checks at execution time. Clients must therefore re-simulate or handle a revert instead of treating
+a previously displayed status as an execution permit.
+
+| Read surface | Data remains available while paused | Related execution rule |
+|---|---|---|
+| `Claims.getClaim`, `stateOf`, `openClaimCount`, `claimsInWindow` | Claim status, lifecycle and limits | `createClaim` checks CLAIMS; `finalizeClaim` checks SETTLEMENT; claimant cancellation remains an exit, subject to shutdown and its conditional settlement rule |
+| `EvidenceRegistry.getEvidence`, `getEvidenceCommitment`, `claimEvidence`, `nextContributorNonce`, `evidenceCount` | Evidence state and pagination | Submission checks both the local switch and EVIDENCE; adjudication checks EVIDENCE |
+| `StakeVault.staked`, `totalStaked`, `lockedPrincipal`, `claimableBalance`, `settlementOutcome`, `reconcile`, `totalCustody` | Stake, exit eligibility and custody accounting | Deposits and settlement transitions are independently gated; `withdraw` rechecks caller balance and shutdown at execution |
+| `FinalRewardAllocator.claimable`, `funded`, `allocated`, `finalized`, `finalOutcome` | Reward and finalization status | `claim` rechecks claimable amount; funding/finalization check SETTLEMENT |
+| `PullSettlementLedger.credited`, `withdrawn`, `availableBalance`, `availableRefBalance`, `isRefProcessed` | Recovery balances and settlement-reference status | Both withdrawal forms recheck aggregate credit and shutdown; credits check SETTLEMENT |
+| `Aggregation.outcome` and the view-only consumer guarantee / event anchors | Result and integration metadata | Aggregation finalization still checks VERIFICATION and SETTLEMENT; consumer metadata is descriptive |
+
+The frontend/API presentation should pair status with the current pause state from the configured
+emergency-controls authority (`paused(scope)`), and present gated actions as unavailable while that
+scope is paused. Recovery balances and status must stay visible. The on-chain mutation remains the
+source of truth if the pause changes between a read and transaction inclusion.
+
+The executable coverage for the read contract is in
+`test/v2/PauseExitLiveness.t.sol::test_pauseViewsRemainReadable_butStaleStatusCannotAuthorizeSettlement`.
+Nested local/scoped behavior, global authority behavior, and consumer gating are covered by the
+adjacent tests in `PauseExitLiveness.t.sol` and `EmergencyPauseRecoveryExercise.t.sol`.
+
 ## 5. Contract behaviour changes
 
 | Change | Why |
