@@ -160,7 +160,12 @@ library V2Errors {
     error InvalidSettlementAmount();
 
     /// @notice Canonical asset conservation invariant is violated; on-chain balance and accounting buckets must match exactly.
-    error ConservationInvariantViolation(address asset, uint256 custody, uint256 obligations, uint256 balance);
+    /// @param asset Asset whose reconciliation failed.
+    /// @param custody Tracked principal + rewards + fees + donations (accounted custody).
+    /// @param obligations Sum of recorded obligations (principal owed to claimants/stakers).
+    /// @param balance Raw on-chain token balance observed by the vault.
+    /// @param unexplainedDeltas Non-negative residual not attributable to any tracked bucket.
+    error ConservationInvariantViolation(address asset, uint256 custody, uint256 obligations, uint256 balance, uint256 unexplainedDeltas);
 
     /// @notice Settlement outcome already recorded for this claim-round.
     /// @param claimId Settlement claim.
@@ -234,7 +239,28 @@ library V2Errors {
     /// @param asset Asset whose accounting failed reconciliation.
     /// @param custody Accounted custody.
     /// @param obligations Sum of recorded obligations.
-    error ObligationsExceedCustody(address asset, uint256 custody, uint256 obligations);
+    /// @param balance Raw on-chain token balance observed by the vault.
+    /// @param unexplainedDeltas Non-negative residual not attributable to any tracked bucket.
+    error ObligationsExceedCustody(address asset, uint256 custody, uint256 obligations, uint256 balance, uint256 unexplainedDeltas);
+
+    /// @notice On-chain balance exceeds tracked custody by an unexplained, non-governed delta.
+    /// @dev Raised when a direct transfer, rebase, or hostile token inflates the raw balance
+    ///      without a corresponding accounting entry. The delta must enter the governed
+    ///      recovery path rather than being silently absorbed into custody.
+    /// @param asset Asset whose reconciliation detected the surplus.
+    /// @param custody Accounted custody (principal + rewards + fees + donations).
+    /// @param balance Raw on-chain token balance observed by the vault.
+    /// @param unexplainedDeltas Non-negative residual (balance - custody) not attributable to any bucket.
+    error UnexplainedBalanceDelta(address asset, uint256 custody, uint256 balance, uint256 unexplainedDeltas);
+
+    /// @notice A tracked custody bucket was mutated without a matching on-chain movement.
+    /// @dev Raised when accounting changes (reward accrual, slash, refund, recovery) do not
+    ///      reconcile against the observed token balance, preventing double-counting of custody.
+    /// @param asset Asset whose bucket mutation failed reconciliation.
+    /// @param bucket Left-aligned ASCII identifier of the mutated bucket (`"<Module>.<bucket>"`).
+    /// @param expected Expected post-mutation custody.
+    /// @param actual Observed post-mutation custody.
+    error CustodyBucketMismatch(address asset, bytes32 bucket, uint256 expected, uint256 actual);
 
     // =========================================================================
     // Aggregation & Reputation
