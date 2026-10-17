@@ -94,6 +94,15 @@ contract AppealVerificationRound is
     error AppealRoundNotOpen(uint256 claimId);
     error AppealRoundExpired(uint256 claimId, uint256 currentTimestamp, uint256 deadline);
     error AppealRoundNotExpired(uint256 claimId, uint256 currentTimestamp, uint256 deadline);
+    error InvalidMaxAppealRounds(uint256 maxAppealRounds);
+    error InvalidAppealBond(uint256 appealBond);
+    error InvalidBondEscalation(uint256 escalationBps);
+    error InvalidMaxAppealBond(uint256 maxAppealBond, uint256 appealBond);
+    error InvalidMaxVotersPerRound(uint256 maxVotersPerRound);
+    error AppealPathTerminal(uint256 claimId);
+    error MaxAppealRoundsExceeded(uint256 claimId, uint256 nextRound, uint256 maxAppealRounds);
+    error BondNotConfigured();
+    error InsufficientBondAllowance();
     error InsufficientStake(uint256 provided, uint256 requiredStake);
     error AlreadyVotedInAppeal(uint256 claimId, address verifier);
     error IndexOutOfBounds();
@@ -139,6 +148,36 @@ contract AppealVerificationRound is
 
     /// @notice Tracks bound appeals for replay protection: parentDisputeId => roundIndex => opened.
     mapping(uint256 => mapping(uint256 => bool)) private _boundAppeals;
+
+    // =========================================================================
+    // Deadline Semantics
+    // =========================================================================
+
+    /// @dev Deadline semantics are INCLUSIVE of the deadline second: a round is open
+    ///      while `block.timestamp <= deadline` and expired once `block.timestamp > deadline`.
+    ///      This makes the one-second-before, exact-deadline, and one-second-after
+    ///      boundaries explicit and deterministic.
+    function _isExpired(uint256 deadline) internal view returns (bool) {
+        return block.timestamp > deadline;
+    }
+
+    function _requiredBondForRound(AppealRoundConfig memory cfg, uint256 roundIndex)
+        internal
+        pure
+        returns (uint256)
+    {
+        if (roundIndex <= 1) return cfg.appealBond;
+        uint256 bond = cfg.appealBond;
+        for (uint256 i = 1; i < roundIndex; i++) {
+            bond = Math.mulDiv(bond, cfg.appealBondEscalationBps, BPS_DENOMINATOR);
+            if (bond > cfg.maxAppealBond) return cfg.maxAppealBond;
+        }
+        return bond > cfg.maxAppealBond ? cfg.maxAppealBond : bond;
+    }
+
+    function _appealLockId(uint256 claimId, uint256 roundIndex) internal pure returns (uint256) {
+        return uint256(keccak256(abi.encodePacked("appeal-bond", claimId, roundIndex)));
+    }
 
     // =========================================================================
     // Constructor

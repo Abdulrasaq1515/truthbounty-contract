@@ -126,7 +126,23 @@ library V2Errors {
     error InvalidNonce(address contributor, uint256 expected, uint256 provided);
 
     /// @notice Pagination limit out of bounds.
+    /// @param limit Requested page size that violated the configured bounds.
     error InvalidPageLimit(uint256 limit);
+
+    /// @notice Pagination cursor does not bind the requested claim/release/order context.
+    /// @param claimId Claim the cursor was expected to bind.
+    /// @param releaseId Release the cursor was expected to bind.
+    /// @param orderKey Ordering key the cursor was expected to bind.
+    error InvalidEvidenceCursor(uint256 claimId, uint256 releaseId, bytes32 orderKey);
+
+    /// @notice Evidence ordering key is malformed or non-monotonic.
+    /// @param orderKey Offending ordering key.
+    error InvalidEvidenceOrder(bytes32 orderKey);
+
+    /// @notice Evidence page bounds are inverted or otherwise invalid.
+    /// @param fromKey Inclusive lower ordering key.
+    /// @param toKey Exclusive upper ordering key.
+    error InvalidEvidenceBounds(bytes32 fromKey, bytes32 toKey);
 
     // =========================================================================
     // Verification
@@ -167,7 +183,12 @@ library V2Errors {
     error InvalidSettlementAmount();
 
     /// @notice Canonical asset conservation invariant is violated; on-chain balance and accounting buckets must match exactly.
-    error ConservationInvariantViolation(address asset, uint256 custody, uint256 obligations, uint256 balance);
+    /// @param asset Asset whose reconciliation failed.
+    /// @param custody Tracked principal + rewards + fees + donations (accounted custody).
+    /// @param obligations Sum of recorded obligations (principal owed to claimants/stakers).
+    /// @param balance Raw on-chain token balance observed by the vault.
+    /// @param unexplainedDeltas Non-negative residual not attributable to any tracked bucket.
+    error ConservationInvariantViolation(address asset, uint256 custody, uint256 obligations, uint256 balance, uint256 unexplainedDeltas);
 
     /// @notice Settlement outcome already recorded for this claim-round.
     /// @param claimId Settlement claim.
@@ -182,6 +203,12 @@ library V2Errors {
     /// @notice Round transfer / rollover / carry-forward rejected because from == to.
     error InvalidRoundTransfer(uint256 fromRound, uint256 toRound);
 
+    /// @notice Deadline has not yet been reached; the action is still within its inclusive window.
+    /// @dev Inclusive semantics: an action is valid while `block.timestamp <= deadline`.
+    ///      Raised when `block.timestamp < deadline` for an action that requires the deadline to have elapsed.
+    /// @param deadline The inclusive deadline timestamp that has not yet been reached.
+    error DeadlineNotReached(uint64 deadline, uint64 timestamp);
+
     // =========================================================================
     // Disputes
     // =========================================================================
@@ -193,11 +220,22 @@ library V2Errors {
     /// @notice Dispute window closed.
     error DisputeWindowClosed();
 
+    /// @notice Deadline has elapsed; the action is past its inclusive window.
+    /// @dev Inclusive semantics: an action is valid while `block.timestamp <= deadline`.
+    ///      Raised when `block.timestamp > deadline`.
+    /// @param deadline The inclusive deadline timestamp that has elapsed.
+    error DeadlineExpired(uint64 deadline, uint64 timestamp);
+
     /// @notice Dispute already opened.
     error DisputeAlreadyExists();
 
     /// @notice Invalid dispute reason.
     error InvalidDisputeReason();
+
+    /// @notice Appeal round is invalid for rollover (zero, non-monotonic, or beyond the bounded window).
+    /// @param fromRound Round the rollover originates from.
+    /// @param toRound Round the rollover targets.
+    error InvalidAppealRound(uint256 fromRound, uint256 toRound);
 
     // =========================================================================
     // Stake & Custody
@@ -241,7 +279,42 @@ library V2Errors {
     /// @param asset Asset whose accounting failed reconciliation.
     /// @param custody Accounted custody.
     /// @param obligations Sum of recorded obligations.
-    error ObligationsExceedCustody(address asset, uint256 custody, uint256 obligations);
+    /// @param balance Raw on-chain token balance observed by the vault.
+    /// @param unexplainedDeltas Non-negative residual not attributable to any tracked bucket.
+    error ObligationsExceedCustody(address asset, uint256 custody, uint256 obligations, uint256 balance, uint256 unexplainedDeltas);
+
+    /// @notice On-chain balance exceeds tracked custody by an unexplained, non-governed delta.
+    /// @dev Raised when a direct transfer, rebase, or hostile token inflates the raw balance
+    ///      without a corresponding accounting entry. The delta must enter the governed
+    ///      recovery path rather than being silently absorbed into custody.
+    /// @param asset Asset whose reconciliation detected the surplus.
+    /// @param custody Accounted custody (principal + rewards + fees + donations).
+    /// @param balance Raw on-chain token balance observed by the vault.
+    /// @param unexplainedDeltas Non-negative residual (balance - custody) not attributable to any bucket.
+    error UnexplainedBalanceDelta(address asset, uint256 custody, uint256 balance, uint256 unexplainedDeltas);
+
+    /// @notice A tracked custody bucket was mutated without a matching on-chain movement.
+    /// @dev Raised when accounting changes (reward accrual, slash, refund, recovery) do not
+    ///      reconcile against the observed token balance, preventing double-counting of custody.
+    /// @param asset Asset whose bucket mutation failed reconciliation.
+    /// @param bucket Left-aligned ASCII identifier of the mutated bucket (`"<Module>.<bucket>"`).
+    /// @param expected Expected post-mutation custody.
+    /// @param actual Observed post-mutation custody.
+    error CustodyBucketMismatch(address asset, bytes32 bucket, uint256 expected, uint256 actual);
+
+    /// @notice Appeal rollover would strand, duplicate, or lose principal across rounds.
+    /// @param asset Asset whose principal conservation failed.
+    /// @param round Round at which the invariant was checked.
+    /// @param expected Principal expected to be preserved.
+    /// @param actual Principal observed after rollover.
+    error AppealPrincipalNotPreserved(address asset, uint256 round, uint256 expected, uint256 actual);
+
+    /// @notice Appeal rollover would strand, duplicate, or lose custody across rounds.
+    /// @param asset Asset whose custody conservation failed.
+    /// @param round Round at which the invariant was checked.
+    /// @param expected Custody expected to be preserved.
+    /// @param actual Custody observed after rollover.
+    error AppealCustodyNotPreserved(address asset, uint256 round, uint256 expected, uint256 actual);
 
     // =========================================================================
     // Aggregation & Reputation

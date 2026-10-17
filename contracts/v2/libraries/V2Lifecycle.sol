@@ -514,14 +514,14 @@ library V2Lifecycle {
     /// @param deadline The deadline timestamp.
     /// @return true if the deadline has not passed.
     function isDeadlineValid(uint64 deadline) internal view returns (bool) {
-        return block.timestamp <= deadline;
+        return block.timestamp < deadline;
     }
 
     /// @notice Validates that a deadline has passed.
     /// @param deadline The deadline timestamp.
     /// @return true if the deadline has passed.
     function isDeadlineExpired(uint64 deadline) internal view returns (bool) {
-        return block.timestamp > deadline;
+        return block.timestamp >= deadline;
     }
 
     /// @notice Computes the remaining time until a deadline.

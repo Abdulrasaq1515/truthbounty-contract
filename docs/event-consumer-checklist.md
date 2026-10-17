@@ -19,6 +19,28 @@ Schema version `1` is the initial compatibility target.
 
 ---
 
+## Amplification metrics (PREWAVE-SC-024)
+
+The stress-test completion event exposes amplification metrics that must be decoded with documented units and bounds. The authoritative source is the on-chain emitter and its ABI artifact; the values below are normative for consumers and must not be relaxed to match broken output.
+
+The `StressTestCompleted` event emits `uint256 maxAmplificationRatioBps`.
+
+- Units: basis points (bps), where `1 bps = 0.01 %`. The ratio is expressed as a non-negative integer in bps.
+- Bounds: `0 `<= `$maxAmplificationRatioBps` `<= 1000000000` (100,000,000,000 bps = 100,000,000% ). This bound is the canonical maximum for the metric and is enforced before emission.
+- Overflow behavior: the emitter must revert when the computed ratio exceeds the canonical maximum or when arithmetic would overflow `uint256`. No wrapped or clipped value may be emitted.
+- Zero is valid and means no amplification was observed.
+- The event fixture in the test suite must match runtime output exactly, including topic and data layout.
+- Monitoring consumers must decode the metric directly from the event data without heuristics or unit guessing.
+- Impossible values (out-of-bounds or overflowing) must fail before emission.
+
+Consumers must also apply the following checks to the amplification metrics:
+
+- Reject any `StressTestCompleted` log whose decoded `maxAmplificationRatioBps` exceeds the canonical maximum.
+- Treat the metric as a non-negative integer in bps; do not scale it by 10,000 or by 100 without an explicit documented conversion.
+- Verify the event topic against the published ABI artifact and fail closed on schema drift.
+
+---
+
 ## Canonical V2 projection replay (V2-SC-132)
 
 Consumers of the canonical V2 modules must also apply the following. The

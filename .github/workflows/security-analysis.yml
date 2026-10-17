@@ -1,3 +1,4 @@
+---
 name: Symbolic Security Analysis
 
 on:
@@ -25,6 +26,11 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Verify Python toolchain
+        run: |
+          python3 --version
+          python3 -m pip --version
+
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -37,11 +43,27 @@ jobs:
 
       - name: Install dependency analyzers
         run: |
-          python3 -m pip install --upgrade pip
-          python3 -m pip install mythril slither-analyzer
+          python3 -m pip install --upgrade "pip==24.2"
+          python3 -m pip install --require-hashes -r .github/requirements-symbolic.txt
+
+      - name: Verify analyzer toolchain
+        run: |
+          python3 -c "import pkg_resources; print('setuptools', pkg_resources.get_distribution('setuptools').version)"
+          python3 -m mythril --version
+          slither --version
 
       - name: Install repo dependencies
         run: npm ci
 
       - name: Run bounded symbolic checks
-        run: ./scripts/symbolic-check.sh --tool auto
+        run: |
+          set -o pipefail
+          ./scripts/symbolic-check.sh --tool auto 2>&1 | tee symbolic-check.log
+
+      - name: Upload symbolic analysis log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: symbolic-check-log
+          path: symbolic-check.log
+          if-no-files-found: warn

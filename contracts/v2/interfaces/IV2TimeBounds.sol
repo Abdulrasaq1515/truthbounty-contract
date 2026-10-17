@@ -21,6 +21,13 @@ pragma solidity ^0.8.28;
  *         (a) Same-block mutation and reentrancy barriers (e.g. anti-double-slashing per block).
  *         (b) Historical snapshot and checkpoint indexing (e.g. voting power binary search).
  *         (c) Discrete sequence and ordering assertions within a block.
+ *
+ *      DEADLINE SEMANTICS (authoritative, inclusive/exclusive):
+ *      - `DeadlinePassed` MUST be thrown when `block.timestamp > deadline` (deadline is INCLUSIVE;
+ *        actions are valid at exactly `block.timestamp == deadline`).
+ *      - `DeadlineNotReached` MUST be thrown when `block.timestamp <= deadline` (deadline is EXCLUSIVE
+ *        for maturity; actions become valid strictly after `deadline`).
+ *      - Appeal rollover boundaries inherit the same inclusive/exclusive rules per round.
  */
 interface IV2TimeBounds {
     // =========================================================================

@@ -90,6 +90,9 @@ registry.renounceRole(DEFAULT_ADMIN_ROLE, deployer);
 registry.renounceRole(REGISTRY_ADMIN_ROLE, deployer);
 guardianContract.renounceRole(DEFAULT_ADMIN_ROLE, deployer);
 // ... repeat for every contract where deployer holds roles
+
+// 5. Machine-check the deployed role graph against the canonical policy
+PostDeploymentRoleCheck.assertRoleGraphMatchesPolicy(timelock, governor, guardian);
 ```
 
 > [!WARNING]
