@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {IV2Types} from "../interfaces/IV2Types.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /// @title ProtocolModel
 /// @notice Independent reference model for TruthBounty V2 lifecycle and accounting rules.
@@ -18,6 +19,7 @@ library ProtocolModel {
     }
 
     error InvalidRoundingPolicy(uint8 roundingPolicy);
+    error WinningWeightExceedsTotal(uint256 winningWeight, uint256 totalWeight);
 
     function calculateWeights(bool[] memory voted, bool[] memory support, uint256[] memory effectiveStake)
         internal
@@ -41,8 +43,11 @@ library ProtocolModel {
         pure
         returns (uint256)
     {
+        if (winningWeight > totalWeight) {
+            revert WinningWeightExceedsTotal(winningWeight, totalWeight);
+        }
         if (totalWeight == 0) return 0;
-        return (winningWeight * BPS_SCALE) / totalWeight;
+        return Math.mulDiv(winningWeight, BPS_SCALE, totalWeight);
     }
 
     function resolveOutcome(uint256 trueWeight, uint256 falseWeight, uint256 totalWeight)
