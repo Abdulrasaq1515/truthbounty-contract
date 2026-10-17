@@ -53,6 +53,10 @@ library V2TimeBounds {
     /// @dev Far exceeds the 600s sequencer drift window to prevent premature expiry.
     uint64 internal constant MIN_DEADLINE_BUFFER = 1 hours;
 
+    /// @notice Maximum permitted skew between an observed timestamp and the authoritative clock.
+    /// @dev Bounds rollover inputs so that appeal rounds cannot be warped beyond the sequencer drift window.
+    uint64 internal constant MAX_ROLLOVER_SKEW = OP_MAX_SEQUENCER_DRIFT;
+
     /// @notice Maximum horizon for scheduling future deadlines (365 days).
     uint64 internal constant MAX_DEADLINE_HORIZON = 365 days;
 
@@ -90,6 +94,10 @@ library V2TimeBounds {
     /// @notice Validates that a proposed deadline satisfies protocol duration and horizon bounds.
     /// @param currentTimestamp The current authoritative timestamp (`block.timestamp`).
     /// @param deadline The proposed deadline timestamp.
+    /// @dev Deadline semantics: `deadline` is INCLUSIVE for activity and EXCLUSIVE for expiry.
+    ///      A deadline equal to `currentTimestamp` is treated as expired for scheduling purposes
+    ///      (a new deadline must be strictly in the future), while `isDeadlineActive` treats the
+    ///      exact deadline second as still active for already-scheduled actions.
     function validateDeadline(uint64 currentTimestamp, uint64 deadline) internal pure {
         if (deadline <= currentTimestamp) {
             revert IV2TimeBounds.DeadlinePassed(currentTimestamp, deadline);
@@ -107,6 +115,8 @@ library V2TimeBounds {
     /// @param currentTimestamp Current block timestamp.
     /// @param deadline Target deadline timestamp.
     /// @return active True if currentTimestamp <= deadline.
+    /// @dev INCLUSIVE: the exact deadline second is still active. This is the authoritative
+    ///      rule for actions that were scheduled before the deadline was reached.
     function isDeadlineActive(uint64 currentTimestamp, uint64 deadline) internal pure returns (bool active) {
         return currentTimestamp <= deadline;
     }
@@ -115,6 +125,8 @@ library V2TimeBounds {
     /// @param currentTimestamp Current block timestamp.
     /// @param deadline Target deadline timestamp.
     /// @return expired True if currentTimestamp > deadline.
+    /// @dev EXCLUSIVE: expiry occurs strictly after the deadline second. This is the exact
+    ///      complement of `isDeadlineActive` and must remain so.
     function isDeadlineExpired(uint64 currentTimestamp, uint64 deadline) internal pure returns (bool expired) {
         return currentTimestamp > deadline;
     }
@@ -122,6 +134,8 @@ library V2TimeBounds {
     /// @notice Validates round duration against minimum and maximum protocol bounds.
     /// @param startedAt The timestamp when the round began.
     /// @param deadline The round closing deadline.
+    /// @dev Round deadlines are INCLUSIVE for the closing second: a round is still open at
+    ///      `deadline` and closes strictly after it. `deadline == startedAt` is invalid.
     function validateRoundDuration(uint64 startedAt, uint64 deadline) internal pure {
         if (deadline <= startedAt) {
             revert IV2TimeBounds.DeadlinePassed(startedAt, deadline);
@@ -129,6 +143,50 @@ library V2TimeBounds {
         uint64 duration = deadline - startedAt;
         if (duration < MIN_ROUND_DURATION || duration > MAX_ROUND_DURATION) {
             revert IV2TimeBounds.RoundDurationOutOfBounds(duration, MIN_ROUND_DURATION, MAX_ROUND_DURATION);
+        }
+    }
+
+    /// @notice Validates the input bounds for an appeal rollover computation.
+    /// @dev Bounds the observed timestamp against the authoritative clock so that a time-warp
+    ///      or reorg cannot push an appeal round outside the sequencer drift window.
+    /// @param currentTimestamp The authoritative timestamp (`block.timestamp`).
+    /// @param observedTimestamp The timestamp observed from the prior round's state.
+    function validateRolloverInputs(uint64 currentTimestamp, uint64 observedTimestamp) internal pure {
+        if (observedTimestamp > currentTimestamp) {
+            revert IV2TimeBounds.TimeNotMonotonic(currentTimestamp, observedTimestamp);
+        }
+        uint64 skew = currentTimestamp - observedTimestamp;
+        if (skew > MAX_ROLLOVER_SKEW) {
+            revert IV2TimeBounds.RolloverSkewExceeded(skew, MAX_ROLLOVER_SKEW);
+        }
+    }
+
+    /// @notice Computes the next appeal round deadline while preserving principal and custody.
+    /// @dev Deadline semantics: the returned deadline is INCLUSIVE for the closing second.
+    ///      The rollover is bounded by `MAX_ROLLOVER_SKEW` and cannot strand or duplicate principal
+    ///      because it is a pure function of the prior deadline and the round duration.
+    /// @param currentTimestamp The authoritative timestamp (`block.timestamp`).
+    /// @param priorDeadline The deadline of the round being rolled over.
+    /// @param roundDuration The duration of the next appeal round.
+    /// @return nextDeadline The inclusive deadline for the next appeal round.
+    function computeAppealRolloverDeadline(
+        uint64 currentTimestamp,
+        uint64 priorDeadline,
+        uint64 roundDuration
+    ) internal pure returns (uint64 nextDeadline) {
+        if (roundDuration < MIN_ROUND_DURATION || roundDuration > MAX_ROUND_DURATION) {
+            revert IV2TimeBounds.RoundDurationOutOfBounds(roundDuration, MIN_ROUND_DURATION, MAX_ROUND_DURATION);
+        }
+        if (priorDeadline > currentTimestamp) {
+            revert IV2TimeBounds.DeadlinePassed(currentTimestamp, priorDeadline);
+        }
+        uint64 base = priorDeadline;
+        if (base > currentTimestamp) {
+            base = currentTimestamp;
+        }
+        nextDeadline = base + roundDuration;
+        if (nextDeadline <= currentTimestamp) {
+            revert IV2TimeBounds.DeadlinePassed(currentTimestamp, nextDeadline);
         }
     }
 
@@ -158,6 +216,7 @@ library V2TimeBounds {
     /// @param cooldownDuration Required cooldown period.
     /// @param currentTimestamp Current block timestamp.
     /// @return ready True if the cooldown has elapsed.
+    /// @dev INCLUSIVE: the cooldown is satisfied at exactly `lastActionTimestamp + cooldownDuration`.
     function isCooldownSatisfied(
         uint64 lastActionTimestamp,
         uint64 cooldownDuration,
@@ -176,6 +235,7 @@ library V2TimeBounds {
     /// @notice Validates that time has progressed monotonically (allowing same-timestamp blocks).
     /// @param previousTimestamp Previous observed timestamp.
     /// @param currentTimestamp Current block timestamp.
+    /// @dev Same-timestamp blocks (`dt == 0`) are permitted; only backward time is rejected.
     function validateMonotonicTime(uint64 previousTimestamp, uint64 currentTimestamp) internal pure {
         if (currentTimestamp < previousTimestamp) {
             revert IV2TimeBounds.TimeNotMonotonic(previousTimestamp, currentTimestamp);
@@ -188,6 +248,8 @@ library V2TimeBounds {
     /// @param lastActivity Timestamp of last recorded activity.
     /// @param decayInterval Length of each discrete decay interval in seconds.
     /// @return intervals Number of completed decay intervals.
+    /// @dev EXCLUSIVE: an interval completes strictly after `decayInterval` seconds have elapsed;
+    ///      `currentTimestamp == lastActivity` yields zero intervals.
     function calculateSafeDecayIntervals(
         uint64 currentTimestamp,
         uint64 lastActivity,
@@ -210,6 +272,7 @@ library V2TimeBounds {
     /// @param startTime Window start timestamp.
     /// @param endTime Window end timestamp.
     /// @return rate Rate per second scaled to 1e18.
+    /// @dev EXCLUSIVE: `endTime == startTime` is a zero-length window and reverts with `RateWindowZero`.
     function calculateRateSafe(
         uint256 deltaAmount,
         uint64 startTime,
@@ -233,6 +296,7 @@ library V2TimeBounds {
     /// @dev Validates that the requested snapshot block is strictly in the past or current block.
     /// @param snapshotBlock Specified snapshot block number.
     /// @param currentBlock Current block number (`block.number`).
+    /// @dev INCLUSIVE: the current block is a valid snapshot block.
     function validateSnapshotBlock(uint256 snapshotBlock, uint256 currentBlock) internal pure {
         if (snapshotBlock > currentBlock) {
             revert IV2TimeBounds.FutureSnapshotBlock(snapshotBlock, currentBlock);
@@ -244,6 +308,8 @@ library V2TimeBounds {
     /// @param lastActionBlock The block number of the previous action.
     /// @param currentBlock Current block number (`block.number`).
     /// @param account Address performing the action.
+    /// @dev EXCLUSIVE: a second action in the same block is rejected; `currentBlock == 0` is
+    ///      treated as a sentinel and never blocks.
     function validateSameBlockAction(
         uint256 lastActionBlock,
         uint256 currentBlock,
