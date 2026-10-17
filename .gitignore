@@ -1,5 +1,4 @@
 node_modules
-.env
 .idea
 
 # Hardhat files
@@ -31,3 +30,4 @@ issues_to_created_contract.md
 
 # HH3 typechain output
 /types
+config.bat

@@ -1,3 +1,4 @@
+
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -63,6 +64,38 @@ library ReleaseReproducibility {
 
     /// @notice Recomputed release digest did not match the approved manifest digest.
     error DigestMismatch(bytes32 expectedDigest, uint256 actualDigest);
+
+    /// @notice A pinned submodule URL did not match the approved provenance URL.
+    error SubmoduleUrlMismatch(string module, bytes32 expectedHash, bytes32 actualHash);
+
+    /// @notice A pinned submodule commit SHA did not match the approved provenance SHA.
+    error SubmoduleShaMismatch(string module, bytes32 expectedSha, bytes32 actualSha);
+
+    /// @notice A required submodule (or nested submodule) is missing from the graph.
+    error MissingSubmodule(string module);
+
+    /// @notice A submodule working tree is dirty (uncommitted or substituted content).
+    error DirtySubmodule(string module);
+
+    /// @notice A pinned submodule commit is unreachable from the recorded graph.
+    error UnreachableSubmoduleCommit(string module, bytes32 sha);
+
+    /// @notice A submodule license hash did not match the approved license.
+    error SubmoduleLicenseMismatch(string module, bytes32 expectedHash, bytes32 actualHash);
+
+    /// @notice A submodule pin was empty (fail-closed on unset provenance fields).
+    error EmptySubmodulePin(string module);
+
+    /// @notice A submodule entry was substituted (identity fields inconsistent).
+    error SubstitutedSubmodule(string module);
+
+    /// @notice Approved forge-std submodule URL hash.
+    bytes32 internal constant FORGE_STD_URL_HASH =
+        keccak256("https://github.com/foundry-rs/forge-std");
+
+    /// @notice Approved OpenZeppelin contracts submodule URL hash.
+    bytes32 internal constant OPENZEPPELIN_URL_HASH =
+        keccak256("https://github.com/OpenZeppelin/openzeppelin-contracts");
 
     /// @notice Pack `(major, minor, patch)` into a single comparable version code.
     /// @dev Rejects components that would overflow the packing scheme fail-closed.
@@ -146,6 +179,99 @@ library ReleaseReproducibility {
 
     /// @notice Check a recomputed digest against the approved manifest digest.
     function checkDigest(bytes32 expectedDigest, bytes32 actualDigest) internal pure {
+        if (expectedDigest != actualDigest) revert DigestMismatch(expectedDigest, uint256(actualDigest));
+    }
+
+    /// @notice A single pinned submodule provenance record.
+    /// @dev `path` identifies the module in the recursive graph; `urlHash` and
+    ///      `sha` pin the immutable source; `licenseHash` pins licensing;
+    ///      `dirty` and `reachable` reflect pre-build verification results.
+    struct SubmodulePin {
+        string path;
+        bytes32 urlHash;
+        bytes32 sha;
+        bytes32 licenseHash;
+        bool dirty;
+        bool reachable;
+    }
+
+    /// @notice Verify a single submodule pin fail-closed against approved provenance.
+    /// @dev Rejects empty pins, dirty trees, unreachable commits, and any URL/SHA/
+    ///      license deviation. Pure and replayable; no state, no authority.
+    function verifySubmodulePin(SubmodulePin memory pin, bytes32 expectedUrlHash, bytes32 expectedLicenseHash)
+        internal
+        pure
+    {
+        if (bytes(pin.path).length == 0) revert EmptySubmodulePin("path");
+        if (pin.urlHash == bytes32(0) || pin.sha == bytes32(0) || pin.licenseHash == bytes32(0)) {
+            revert EmptySubmodulePin(pin.path);
+        }
+        if (pin.dirty) revert DirtySubmodule(pin.path);
+        if (!pin.reachable) revert UnreachableSubmoduleCommit(pin.path, pin.sha);
+        if (pin.urlHash != expectedUrlHash) {
+            revert SubmoduleUrlMismatch(pin.path, expectedUrlHash, pin.urlHash);
+        }
+        if (pin.licenseHash != expectedLicenseHash) {
+            revert SubmoduleLicenseMismatch(pin.path, expectedLicenseHash, pin.licenseHash);
+        }
+    }
+
+    /// @notice Verify a pinned submodule SHA against an approved SHA fail-closed.
+    function verifySubmoduleSha(string memory module, bytes32 expectedSha, bytes32 actualSha) internal pure {
+        if (expectedSha == bytes32(0) || actualSha == bytes32(0)) revert EmptySubmodulePin(module);
+        if (expectedSha != actualSha) revert SubmoduleShaMismatch(module, expectedSha, actualSha);
+    }
+
+    /// @notice Require a submodule to be present in the recursive graph.
+    function requireSubmodulePresent(string memory module, bool present) internal pure {
+        if (!present) revert MissingSubmodule(module);
+    }
+
+    /// @notice Reject a dirty or substituted submodule working tree fail-closed.
+    function requireCleanSubmodule(string memory module, bool dirty) internal pure {
+        if (dirty) revert DirtySubmodule(module);
+    }
+
+    /// @notice Reject an unreachable pinned commit fail-closed.
+    function requireReachableCommit(string memory module, bytes32 sha, bool reachable) internal pure {
+        if (sha == bytes32(0)) revert EmptySubmodulePin(module);
+        if (!reachable) revert UnreachableSubmoduleCommit(module, sha);
+    }
+
+    /// @notice Verify a submodule license hash against the approved license fail-closed.
+    function verifySubmoduleLicense(string memory module, bytes32 expectedHash, bytes32 actualHash) internal pure {
+        if (expectedHash == bytes32(0) || actualHash == bytes32(0)) revert EmptySubmodulePin(module);
+        if (expectedHash != actualHash) revert SubmoduleLicenseMismatch(module, expectedHash, actualHash);
+    }
+
+    /// @notice Reject a substituted submodule whose identity fields are inconsistent.
+    /// @dev A substitution is detected when the recorded path hash does not match
+    ///      the expected path hash for the pinned URL/SHA pair.
+    function requireNotSubstituted(string memory module, bytes32 expectedPathHash, bytes32 actualPathHash)
+        internal
+        pure
+    {
+        if (expectedPathHash == bytes32(0) || actualPathHash == bytes32(0)) revert EmptySubmodulePin(module);
+        if (expectedPathHash != actualPathHash) revert SubstitutedSubmodule(module);
+    }
+
+    /// @notice Compute the deterministic dependency-graph digest over pinned submodules.
+    /// @dev `abi.encode` keeps field boundaries unambiguous so the digest has
+    ///      exactly one preimage parse. Pure and replayable.
+    function dependencyGraphDigest(SubmodulePin[] memory pins) internal pure returns (bytes32) {
+        bytes32[] memory urlHashes = new bytes32[](pins.length);
+        bytes32[] memory shas = new bytes32[](pins.length);
+        bytes32[] memory licenseHashes = new bytes32[](pins.length);
+        for (uint256 i = 0; i < pins.length; i++) {
+            urlHashes[i] = pins[i].urlHash;
+            shas[i] = pins[i].sha;
+            licenseHashes[i] = pins[i].licenseHash;
+        }
+        return keccak256(abi.encode(urlHashes, shas, licenseHashes));
+    }
+
+    /// @notice Check a recomputed dependency-graph digest against the approved digest.
+    function checkDependencyGraphDigest(bytes32 expectedDigest, bytes32 actualDigest) internal pure {
         if (expectedDigest != actualDigest) revert DigestMismatch(expectedDigest, uint256(actualDigest));
     }
 }
