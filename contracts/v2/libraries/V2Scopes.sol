@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import {V2OperationIds} from "./V2OperationIds.sol";
+
 /// @title V2Scopes
 /// @notice Canonical emergency-control scope manifest for the TruthBounty V2 protocol.
 /// @dev Every protected canonical mutation declares exactly one scope from this library and
@@ -21,6 +23,9 @@ pragma solidity ^0.8.20;
 library V2Scopes {
     /// @notice Number of scopes in the canonical manifest.
     uint256 internal constant CANONICAL_SCOPE_COUNT = 26;
+
+    /// @notice Number of canonical operation identifiers in the published matrix.
+    uint256 internal constant CANONICAL_OPERATION_COUNT = 26;
 
     // -------------------------------------------------------------------------
     // Protocol-wide
@@ -217,5 +222,65 @@ library V2Scopes {
     /// @notice Returns true when the scope belongs to the canonical manifest.
     function isCanonical(bytes32 scope) internal pure returns (bool) {
         return bytes(description(scope)).length != 0;
+    }
+
+    /// @notice Returns the stable operation identifier for a canonical scope.
+    /// @dev Operation IDs are derived deterministically from the scope preimage so that
+    ///      renamed functions, proxy upgrades, and interface reshuffles cannot silently
+    ///      change the wire identifier. Unknown scopes fail closed by reverting.
+    function operationId(bytes32 scope) internal pure returns (bytes32) {
+        require(isCanonical(scope), "V2Scopes: unknown operation");
+        return keccak256(abi.encodePacked("v2.operation", scope));
+    }
+
+    /// @notice Returns the canonical scope for a given operation identifier.
+    /// @dev Inverse of `operationId`. Reverts when the operation is not part of the
+    ///      published matrix, preventing accidental global-scope aliasing.
+    function scopeForOperation(bytes32 opId) internal pure returns (bytes32) {
+        bytes32[] memory scopes = canonicalScopes();
+        for (uint256 i = 0; i < scopes.length; ++i) {
+            if (operationId(scopes[i]) == opId) {
+                return scopes[i];
+            }
+        }
+        revert("V2Scopes: unknown operation");
+    }
+
+    /// @notice Returns the complete canonical operation matrix in stable order.
+    /// @dev Positional order matches `canonicalScopes()`; consumers (frontend, API,
+    ///      indexers) must treat this as the authoritative published matrix.
+    function canonicalOperations() internal pure returns (bytes32[] memory ops) {
+        bytes32[] memory scopes = canonicalScopes();
+        ops = new bytes32[](scopes.length);
+        for (uint256 i = 0; i < scopes.length; ++i) {
+            ops[i] = operationId(scopes[i]);
+        }
+    }
+
+    /// @notice Returns true when the operation identifier belongs to the canonical matrix.
+    function isCanonicalOperation(bytes32 opId) internal pure returns (bool) {
+        bytes32[] memory scopes = canonicalScopes();
+        for (uint256 i = 0; i < scopes.length; ++i) {
+            if (operationId(scopes[i]) == opId) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// @notice Returns the operation identifier paired with its scope and description.
+    /// @dev Published matrix surface for frontend/API consumers and coverage tests.
+    function operationMatrix()
+        internal
+        pure
+        returns (bytes32[] memory ops, bytes32[] memory scopes, string[] memory descriptions)
+    {
+        scopes = canonicalScopes();
+        ops = new bytes32[](scopes.length);
+        descriptions = new string[](scopes.length);
+        for (uint256 i = 0; i < scopes.length; ++i) {
+            ops[i] = operationId(scopes[i]);
+            descriptions[i] = description(scopes[i]);
+        }
     }
 }
