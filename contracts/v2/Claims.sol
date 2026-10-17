@@ -60,6 +60,12 @@ contract Claims is ERC165, AccessControl, ReentrancyGuard, IClaims, V2WiredPause
         address feeRecipient
     );
 
+    /// @notice V2-SC-039: exact integer attribution for one submission-fee routing.
+    /// @dev Emitted exactly once per paid `createClaim`. The fee is charged on top of
+    ///      (never from) the escrowed bounty, so the escrowed reward is never reduced
+    ///      by fee arithmetic and the fee can never be routed twice for one claim.
+    event ClaimFeeCharged(uint256 indexed claimId, address indexed payer, address indexed feeRecipient, uint256 amount);
+
     /// @param admin Governance / deployment authority.
     /// @param bountyToken_ ERC-20 used for claim bounties and submission fees.
     /// @param feeRecipient_ Pull destination for claim submission fees (non-zero).
@@ -189,6 +195,10 @@ contract Claims is ERC165, AccessControl, ReentrancyGuard, IClaims, V2WiredPause
         claimId = _nextClaimId;
         unchecked {
             _nextClaimId = claimId + 1;
+        }
+
+        if (fee != 0) {
+            emit ClaimFeeCharged(claimId, claimant, feeRecipient, fee);
         }
 
         IV2Types.Claim storage c = _claims[claimId];
