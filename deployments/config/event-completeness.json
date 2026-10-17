@@ -1,7 +1,7 @@
 {
   "manifestVersion": 1,
-  "issue": "V2-SC-132",
-  "specification": "TruthBounty Canonical V2 Event Completeness for Projection Replay (docs/v2/event-completeness-projection-replay.md)",
+  "issue": "PREWAVE-SC-024",
+  "specification": "TruthBounty Canonical V2 Event Completeness for Projection Replay with Stress-Test Amplification Metric Reconciliation (docs/v2/event-completeness-projection-replay.md, docs/v2/stress-test-amplification-metrics.md)",
   "chainId": 11155420,
   "environment": "testnet",
   "catalogue": "contracts/v2/libraries/V2EventCompleteness.sol",
@@ -17,6 +17,33 @@
     "mutationsAreTerminal": true,
     "orderIsTotal": true,
     "projectionIsDeterministic": true
+  },
+  "amplificationMetrics": {
+    "metricVersion": 1,
+    "event": "StressTestCompleted",
+    "field": "maxAmplificationRatioBps",
+    "units": "basis-points",
+    "unitScale": 10000,
+    "min": 0,
+    "max": 1000000,
+    "overflowBehavior": "revert-before-emission",
+    "authoritativeSource": "contracts/v2/StressTestHarness.sol::StressTestCompleted.maxAmplificationRatioBps",
+    "boundsRationale": "0 bps encodes zero amplification; 10000 bps encodes 1x nominal; 1000000 bps encodes the maximum permitted 100x amplification; values above max are impossible and must revert before emission",
+    "monitoring": {
+      "decoding": "uint256 basis points; divide by unitScale to obtain a dimensionless ratio",
+      "heuristicsAllowed": false,
+      "consumerContract": "monitoring/consumers/stress-test-completed.md"
+    },
+    "abiArtifacts": [
+      "contracts/v2/abi/StressTestHarness.json",
+      "contracts/v2/abi/V2EventCompleteness.json"
+    ],
+    "fixtures": [
+      "test/fixtures/events/StressTestCompleted.zero.json",
+      "test/fixtures/events/StressTestCompleted.nominal.json",
+      "test/fixtures/events/StressTestCompleted.max.json",
+      "test/fixtures/events/StressTestCompleted.overflow.json"
+    ]
   },
   "coverageVocabulary": {
     "Direct": 0,

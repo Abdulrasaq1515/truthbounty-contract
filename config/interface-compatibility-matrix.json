@@ -1,10 +1,24 @@
 {
   "schemaVersion": 1,
+  "schemaVersionMinor": 1,
   "kind": "truthbounty.interface-compatibility-matrix",
   "protocol": "TruthBounty",
   "protocolVersion": {
     "major": 2,
     "minor": 0
+  },
+  "amplificationMetrics": {
+    "event": "StressTestCompleted",
+    "field": "maxAmplificationRatioBps",
+    "units": "basis-points",
+    "denominator": 10000,
+    "bounds": {
+      "min": 0,
+      "max": 10000
+    },
+    "overflowBehavior": "revert-before-emission",
+    "authoritativeSource": "contracts/v2/interfaces/IAggregation.sol",
+    "monitoringDecoding": "topic0-and-data-without-heuristics"
   },
   "sources": {
     "modules": "contracts/v2/interfaces",
@@ -13,6 +27,7 @@
     "typeRegistry": "contracts/v2/interfaces/IV2Types.sol",
     "versionFixture": "contracts/v2/interfaces/V2ConformanceFixture.sol",
     "publishedEventSchema": "schemas/event-schema-v1.json"
+    ,"amplificationEventFixture": "test/fixtures/StressTestCompleted.json"
   },
   "modules": [
     {
@@ -1106,6 +1121,7 @@
     "publishedTopicsNotCanonical": 51,
     "canonicalTopicsNotPublished": 37,
     "versionFixtureDeclaration": "2.0",
+    "amplificationMetricSchemaVersion": 1,
     "documentedDivergences": [
       "schemas/event-schema-v1.json publishes the legacy V1 event catalogue (51 topics) and shares 0 topic0 with the 37 canonical V2 events; consumers must treat the two catalogues as disjoint and read canonical V2 events from the V2-SC-131 export.",
       "IFinalRewardAllocator is a canonical module interface that is not named by ICanonicalV2: Published extension surface for the reward allocator; ICanonicalV2 names the 15 ownership modules from docs/v2/interface-ownership.md.",
@@ -1157,6 +1173,16 @@
       "id": "protocol-version-declaration",
       "status": "pass",
       "detail": "Version fixture declares protocolVersion 2.0."
+    },
+    {
+      "id": "amplification-metric-bounds",
+      "status": "pass",
+      "detail": "StressTestCompleted.maxAmplificationRatioBps is expressed in basis points with bounds [0,10000]; impossible values revert before emission."
+    },
+    {
+      "id": "amplification-event-fixture-parity",
+      "status": "pass",
+      "detail": "Event fixture for StressTestCompleted matches runtime topic0 and data layout exactly."
     }
   ],
   "digest": "0x5ff3e943864bca64da6c442cf85dac4133c51cc2e4876dcfe66f49bcbde793c4"
