@@ -22,6 +22,7 @@ pragma solidity ^0.8.28;
 
 import {ParticipationThresholdTypes} from "./ParticipationThresholdTypes.sol";
 import {ParticipationConfidenceRules} from "./ParticipationConfidenceRules.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /**
  * @title RoundFinalization
@@ -250,6 +251,9 @@ library RoundFinalization {
         uint256 totalWeight
     ) internal pure returns (uint256 bps) {
         if (totalWeight == 0) return 0;
-        return (winningWeight * ParticipationThresholdTypes.BPS_DENOMINATOR) / totalWeight;
+        if (winningWeight > totalWeight) {
+            revert ParticipationConfidenceRules.WinningWeightExceedsTotal(winningWeight, totalWeight);
+        }
+        return Math.mulDiv(winningWeight, ParticipationThresholdTypes.BPS_DENOMINATOR, totalWeight);
     }
 }
