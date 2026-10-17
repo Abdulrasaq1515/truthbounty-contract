@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 /**
  * @title ICriticalPathGasBudgets
- * @notice Critical-path operations benchmarked under V2-SC-038.
+ * @notice Critical-path operations benchmarked under V2-SC-038 and V2-SC-072.
  */
 interface ICriticalPathGasBudgets {
     enum Operation {
@@ -15,7 +15,10 @@ interface ICriticalPathGasBudgets {
         CHALLENGE_OPEN,
         APPEAL_SETTLEMENT,
         FINALIZATION,
-        WITHDRAWAL
+        WITHDRAWAL,
+        REWARD_CLAIM,
+        GOVERNANCE_CONFIGURATION,
+        EMERGENCY_PAUSE
     }
 
     struct GasBudget {

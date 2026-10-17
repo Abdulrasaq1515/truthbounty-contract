@@ -15,6 +15,9 @@ library ProtocolExecutionBounds {
     /// @notice Maximum evidence attachments per claim (EvidenceManager).
     uint256 internal constant MAX_EVIDENCE_PER_CLAIM = 100;
 
+    /// @notice Maximum assets allowed in one published parameter version.
+    uint256 internal constant MAX_SUPPORTED_ASSETS = 16;
+
     /// @notice Maximum treasury batch payout rows (TruthBountyClaims).
     uint256 internal constant MAX_SETTLEMENT_BATCH_SIZE = 200;
 
@@ -38,4 +41,19 @@ library ProtocolExecutionBounds {
 
     /// @notice Recommended maximum gas for a single critical-path transaction at max config.
     uint256 internal constant RECOMMENDED_TX_GAS_CEILING = 12_000_000;
+
+    /// @notice Maximum claim creations per account inside one spam window (V2-SC-105).
+    uint256 internal constant MAX_CLAIMS_PER_ACCOUNT_WINDOW = 10;
+
+    /// @notice Sliding window length for claim-creation rate limiting (V2-SC-105).
+    uint256 internal constant CLAIM_SPAM_WINDOW_SECONDS = 1 hours;
+
+    /// @notice Maximum concurrently open (non-terminal) claims per creator (V2-SC-105).
+    uint256 internal constant MAX_OPEN_CLAIMS_PER_CREATOR = 25;
+
+    /// @notice Default minimum verifier stake to reject dust griefing (V2-SC-105).
+    uint256 internal constant DEFAULT_MIN_STAKE_AMOUNT = 1 ether;
+
+    /// @notice Default minimum claim bounty / reward (V2-SC-105).
+    uint256 internal constant DEFAULT_MIN_BOUNTY_AMOUNT = 1 ether;
 }

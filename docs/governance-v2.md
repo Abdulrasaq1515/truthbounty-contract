@@ -77,3 +77,25 @@ Manifest entries are emitted via `TruthBountyGovernor.publishManifest()` and wri
 - Proposal spam mitigated by `proposalThreshold`
 - Timelock bypass prevented: governor is sole proposer; guardian cannot execute
 - Target allowlist enforced at proposal creation
+
+## Authority Boundaries (V2-SC-111)
+
+`GovernanceAuthorityBoundaries` publishes the canonical `(role, capability)` matrix encoded by
+`GovernanceAuthorityMatrix`. Each authority role is bound to at most one accountable account and an
+account may hold at most one role, so overlapping authority is rejected on-chain.
+
+| Authority | Exclusive capabilities |
+|-----------|------------------------|
+| Governor | `PROPOSE_PROPOSAL`, `QUEUE_PROPOSAL` |
+| Timelock | `EXECUTE_PROPOSAL`, `SET_TIMELOCK_ROLES`, `UPGRADE_IMPLEMENTATION` |
+| Guardian | `PAUSE_PROTOCOL` |
+| Registry | `REGISTER_GOVERNED_MODULE` |
+| Configuration | `SET_PROTOCOL_PARAMETER` |
+| Treasury | `RELEASE_TREASURY_FUNDS` |
+| Operations | `ROTATE_OPERATIONAL_ROLE` |
+
+`CANCEL_PROPOSAL` is the only intentionally shared capability (Governor and Guardian). Claim-outcome
+selectors (`settleClaim*`) belong to no authority and remain rejected by `GovernanceForbiddenCalls`.
+
+`AUTHORITY_ADMIN_ROLE` is granted to the bootstrap admin at deployment and must be handed to the
+timelock once the topology is bound, mirroring `GovernanceRoleTopology.finalizeTimelockAdmin`.

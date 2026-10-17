@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "description": "Triaged Slither findings for the canonical V2 scope. Every entry is a reviewed disposition. Only 'false-positive' and 'accepted-risk' suppress a finding, and both require a justification of at least minJustificationLength characters plus reviewer metadata. Deleting an entry, or adding one without justification, fails scripts/static-analysis-gate.mjs.",
+  "triagedWith": {
+    "slither": "0.11.6",
+    "solc": "0.8.28",
+    "scope": "contracts/v2"
+  },
+  "entries": []
+}

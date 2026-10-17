@@ -37,7 +37,7 @@ abstract contract ProtocolUpgradeable is
         address _admin,
         address _upgradeController,
         address _governanceController
-    ) internal {
+    ) internal onlyInitializing {
         require(_admin != address(0), ZeroAddress());
 
 

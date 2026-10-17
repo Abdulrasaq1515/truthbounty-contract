@@ -1,0 +1,47 @@
+name: Symbolic Security Analysis
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  symbolic-security-check:
+    name: Critical-path symbolic analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.8.3
+
+      - name: Install dependency analyzers
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install mythril slither-analyzer
+
+      - name: Install repo dependencies
+        run: npm ci
+
+      - name: Run bounded symbolic checks
+        run: ./scripts/symbolic-check.sh --tool auto

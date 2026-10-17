@@ -1,0 +1,6 @@
+# Pinned analyzer toolchain for the zero-new-finding static analysis baseline.
+# Versions are asserted by config/static-analysis.json and enforced by
+# scripts/static-analysis-gate.mjs. Bump both together, in one commit, together
+# with a re-triaged config/slither-baseline.json.
+slither-analyzer==0.11.6
+crytic-compile==0.4.2

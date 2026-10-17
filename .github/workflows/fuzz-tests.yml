@@ -21,10 +21,10 @@ jobs:
     - name: Install Foundry
       uses: foundry-rs/foundry-toolchain@v1
       with:
-        version: nightly
+        version: v1.8.3
         
-    - name: Install dependencies
-      run: forge install
+    - name: Verify pinned Foundry dependencies
+      run: git submodule status --recursive
       
     - name: Run fuzz tests - WeightedStaking
       run: forge test --match-contract WeightedStakingFuzzTest -vvv
@@ -45,7 +45,7 @@ jobs:
       run: forge coverage --ir-minimum --report lcov --skip script
       
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v3
+      uses: codecov/codecov-action@v7
       with:
         file: ./lcov.info
         flags: fuzz-tests
@@ -62,10 +62,10 @@ jobs:
     - name: Install Foundry
       uses: foundry-rs/foundry-toolchain@v1
       with:
-        version: nightly
+        version: v1.8.3
         
-    - name: Install dependencies
-      run: forge install
+    - name: Verify pinned Foundry dependencies
+      run: git submodule status --recursive
       
     - name: Run property-based tests
       run: |
