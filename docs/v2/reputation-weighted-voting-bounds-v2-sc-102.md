@@ -23,15 +23,24 @@ The objective of V2-SC-102 is to eliminate risk vectors surrounding reputation-w
 
 ### 1. Effective Voting Weight Calculation
 
-Voting weight $W_{\text{effective}}$ for a verifier with raw stake $S$, reputation score $R$, min reputation bound $R_{\min}$, max reputation bound $R_{\max}$, appeal multiplier $M_{\text{appeal}}$, total round stake $S_{\text{total}}$, and weight cap $C_{\text{bps}}$ (in basis points, $10,000 = 100\%$) is derived as follows:
+Voting weight $W_{\text{effective}}$ for a verifier with raw stake $S$, reputation score $R$, min reputation bound $R_{\min}$, max reputation bound $R_{\max}$, appeal multiplier $M_{\text{appeal}}$, total round stake $S_{\text{total}}$, and weight cap $C_{\text{bps}}$ (in basis points, $10,000 = 100\%$) is derived as follows. Stakes and weights use the token's smallest integer unit; reputation uses WAD (`10^{18}`); multiplier and cap inputs use basis points (`10,000`):
 
 $$\text{Clamped Reputation } R_{\text{clamped}} = \max(R_{\min}, \min(R_{\max}, R))$$
 
-$$\text{Raw Weighted Power } W_{\text{raw}} = \frac{S \times R_{\text{clamped}} \times M_{\text{appeal}}}{10^{18} \times 10,000}$$
+$$W_{\text{rep}} = \left\lfloor\frac{S \times R_{\text{clamped}}}{10^{18}}\right\rfloor$$
 
-$$\text{Maximum Allowed Weight } W_{\max} = \frac{S_{\text{total}} \times C_{\text{bps}}}{10,000}$$
+$$W_{\text{raw}} = \left\lfloor\frac{W_{\text{rep}} \times M_{\text{appeal}}}{10,000}\right\rfloor$$
+
+$$W_{\max} = \left\lfloor\frac{S_{\text{total}} \times C_{\text{bps}}}{10,000}\right\rfloor$$
 
 $$W_{\text{effective}} = \min(W_{\text{raw}}, W_{\max})$$
+
+Each division rounds down independently, matching the two sequential full-precision `mulDiv`
+operations in `ReputationWeightedVotingBounds.computeEffectiveVotingWeight`. This staged
+rounding is part of the protocol result; it is not interchangeable with one division of the
+three-factor product. A zero cap disables the cap, and a zero total round stake also skips
+cap enforcement. `mulDiv` uses a 512-bit intermediate and reverts if the final quotient
+cannot fit in `uint256`; invalid cap and reputation bounds are rejected before calculation.
 
 ### 2. Zero-Reputation Behavior
 
