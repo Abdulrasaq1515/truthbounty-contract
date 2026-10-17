@@ -97,6 +97,16 @@ proposal references the implementation.
 Separating `PROPOSER`, `VALIDATOR`, `UPGRADER`, and `EXECUTOR` enforces multi-party control:
 no single actor can propose, validate, approve, and execute an upgrade alone.
 
+### Proxy upgrade authority boundary
+
+For modules inheriting `ProtocolUpgradeable`, the configured upgrade controller must also
+hold `GOVERNANCE_ROLE` to authorize a UUPS upgrade. `DEFAULT_ADMIN_ROLE` alone cannot
+authorize an implementation, change the configured controller, or grant either governance
+or upgrade-controller authority. Governance is the admin of both authority roles; initialize
+the module with the governance-controlled executor as its upgrade controller, and ensure
+that executor holds `GOVERNANCE_ROLE`. Direct implementation initialization remains disabled
+by the implementation constructor.
+
 ## Timelock
 
 Approvals start a configurable `upgradeTimelock` (default **2 days**, bounded to
